@@ -1,8 +1,8 @@
 """Tests for Unicode handling improvements"""
-import sys
 import os
-from pathlib import Path
+import sys
 import tempfile
+from pathlib import Path
 
 sys.path.append(os.getcwd())
 
@@ -81,10 +81,10 @@ def test_nonexistent_file():
     temp_path = Path("nonexistent_test_file_12345.txt")
 
     try:
-        content = safe_read_text(temp_path)
+        _ = safe_read_text(temp_path)
         print("  [FAIL] Nonexistent file should have raised error")
         sys.exit(1)
-    except (IOError, FileNotFoundError):
+    except (OSError, FileNotFoundError):
         print("  [OK] Nonexistent file properly rejected")
 
 

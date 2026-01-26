@@ -1,8 +1,8 @@
 import time
-from typing import Any, Optional, Dict, Tuple
 from collections import OrderedDict
-from threading import Lock
 from pathlib import Path
+from threading import Lock
+from typing import Any
 
 from logger import get_logger
 
@@ -28,7 +28,7 @@ class LRUCache:
         self.hits = 0
         self.misses = 0
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         Retrieves value from cache.
 
@@ -70,7 +70,7 @@ class LRUCache:
             self.cache.clear()
             logger.debug("LRU cache cleared")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Returns cache statistics.
 
@@ -105,13 +105,13 @@ class TTLCache:
         """
         self.ttl_seconds = ttl_seconds
         self.max_size = max_size
-        self.cache: Dict[str, Tuple[Any, float]] = {}
+        self.cache: dict[str, tuple[Any, float]] = {}
         self.lock = Lock()
         self.hits = 0
         self.misses = 0
         self.expirations = 0
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """
         Retrieves value from cache if not expired.
 
@@ -186,7 +186,7 @@ class TTLCache:
 
             return len(expired_keys)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Returns cache statistics.
 
@@ -221,10 +221,10 @@ class FileCache:
             capacity: Maximum number of files to cache
         """
         self.lru_cache = LRUCache(capacity)
-        self.mtime_cache: Dict[str, float] = {}
+        self.mtime_cache: dict[str, float] = {}
         self.lock = Lock()
 
-    def get(self, file_path: Path) -> Optional[str]:
+    def get(self, file_path: Path) -> str | None:
         """
         Retrieves file content from cache if file hasn't been modified.
 
@@ -275,6 +275,6 @@ class FileCache:
             self.lru_cache.clear()
             self.mtime_cache.clear()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Returns file cache statistics."""
         return self.lru_cache.get_stats()

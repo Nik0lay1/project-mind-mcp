@@ -1,11 +1,8 @@
-import sys
 import hashlib
 import json
-from typing import Optional
-from pathlib import Path
 
-from config import VECTOR_STORE_DIR, MODEL_NAME
 from cache_manager import TTLCache
+from config import MODEL_NAME, VECTOR_STORE_DIR
 from logger import get_logger
 
 logger = get_logger()
@@ -81,7 +78,7 @@ class VectorStoreManager:
                 return None
         return self.collection
 
-    def clear_collection(self) -> Optional[str]:
+    def clear_collection(self) -> str | None:
         """
         Clears the current collection by deleting and recreating it.
 
@@ -104,7 +101,7 @@ class VectorStoreManager:
             logger.error(error_msg)
             return error_msg
 
-    def get_count(self) -> Optional[int]:
+    def get_count(self) -> int | None:
         """
         Gets the number of items in the collection.
 
@@ -125,9 +122,9 @@ class VectorStoreManager:
         self,
         query_texts: list[str],
         n_results: int = 5,
-        where: Optional[dict] = None,
-        where_document: Optional[dict] = None
-    ) -> Optional[dict]:
+        where: dict | None = None,
+        where_document: dict | None = None
+    ) -> dict | None:
         """
         Queries the vector store with caching.
 
@@ -167,8 +164,8 @@ class VectorStoreManager:
         self,
         query_texts: list[str],
         n_results: int,
-        where: Optional[dict],
-        where_document: Optional[dict]
+        where: dict | None,
+        where_document: dict | None
     ) -> str:
         """
         Generates a unique cache key for query parameters.

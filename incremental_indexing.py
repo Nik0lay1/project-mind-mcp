@@ -2,10 +2,9 @@ import json
 import os
 import sys
 import tempfile
-from pathlib import Path
-from typing import Dict, Set
-from datetime import datetime
 from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 
 from config import INDEX_METADATA_FILE
 
@@ -84,13 +83,13 @@ def atomic_write(file_path: Path, content: str) -> None:
 
 class IndexMetadata:
     def __init__(self):
-        self.metadata: Dict[str, Dict] = {}
+        self.metadata: dict[str, dict] = {}
         self.load()
 
     def load(self) -> None:
         if INDEX_METADATA_FILE.exists():
             try:
-                with open(INDEX_METADATA_FILE, "r") as f:
+                with open(INDEX_METADATA_FILE) as f:
                     self.metadata = json.load(f)
             except Exception:
                 self.metadata = {}
@@ -137,7 +136,7 @@ class IndexMetadata:
 
         return changed_files
 
-    def remove_deleted_files(self, existing_files: Set[str]) -> None:
+    def remove_deleted_files(self, existing_files: set[str]) -> None:
         files_to_remove = []
         for file_path in self.metadata.keys():
             if file_path not in existing_files:
@@ -146,7 +145,7 @@ class IndexMetadata:
         for file_path in files_to_remove:
             del self.metadata[file_path]
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         if not self.metadata:
             return {"total_files": 0, "last_index": None}
 

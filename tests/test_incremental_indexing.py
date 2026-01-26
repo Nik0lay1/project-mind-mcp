@@ -1,13 +1,13 @@
-import unittest
-from unittest.mock import patch, mock_open, MagicMock
-from pathlib import Path
 import json
-import sys
 import os
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, mock_open, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from incremental_indexing import IndexMetadata, atomic_write, file_lock
+from incremental_indexing import IndexMetadata, atomic_write
 
 
 class TestAtomicWrite(unittest.TestCase):

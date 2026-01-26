@@ -1,6 +1,6 @@
-import sys
-import os
 import json
+import os
+import sys
 import tempfile
 import threading
 import time
@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.append(os.getcwd())
 
-from incremental_indexing import IndexMetadata, atomic_write, file_lock
 from config import INDEX_METADATA_FILE
+from incremental_indexing import IndexMetadata, atomic_write
 
 
 def test_atomic_write():
@@ -58,9 +58,9 @@ def test_atomic_write_rollback_on_error():
         test_file = Path(tmpdir) / "test.json"
         original_content = '{"original": true}'
         test_file.write_text(original_content)
-        original_exists = test_file.exists()
 
         from unittest.mock import patch
+
         import incremental_indexing
 
         with patch.object(incremental_indexing.os, 'replace', side_effect=OSError("Simulated replace failure")):
@@ -74,7 +74,7 @@ def test_atomic_write_rollback_on_error():
         if test_file.exists():
             assert test_file.read_text() == original_content
         else:
-            print(f"  [WARNING] Original file was deleted (Windows behavior)")
+            print("  [WARNING] Original file was deleted (Windows behavior)")
 
         temp_files = list(Path(tmpdir).glob(".*.tmp"))
         assert len(temp_files) == 0, f"Temp files not cleaned up: {temp_files}"
@@ -172,7 +172,7 @@ def cleanup_test_metadata():
     if INDEX_METADATA_FILE.exists():
         try:
             INDEX_METADATA_FILE.unlink()
-        except:
+        except OSError:
             pass
 
 

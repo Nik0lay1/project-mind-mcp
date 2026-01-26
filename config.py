@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import Set
 
 PROJECT_ROOT = Path.cwd().resolve()
 
@@ -24,7 +23,7 @@ BATCH_SIZE = 100
 MAX_FILE_SIZE_MB = 10
 MAX_MEMORY_MB = 100
 
-DEFAULT_IGNORED_DIRS: Set[str] = {
+DEFAULT_IGNORED_DIRS: set[str] = {
     ".git",
     "node_modules",
     ".ai",
@@ -44,7 +43,7 @@ DEFAULT_IGNORED_DIRS: Set[str] = {
     "*.egg-info",
 }
 
-BINARY_EXTENSIONS: Set[str] = {
+BINARY_EXTENSIONS: set[str] = {
     ".pyc",
     ".pyo",
     ".pyd",
@@ -78,7 +77,7 @@ BINARY_EXTENSIONS: Set[str] = {
     ".7z",
 }
 
-CODE_EXTENSIONS: Set[str] = {
+CODE_EXTENSIONS: set[str] = {
     ".py",
     ".js",
     ".ts",
@@ -106,7 +105,7 @@ CODE_EXTENSIONS: Set[str] = {
     ".fish",
 }
 
-TEXT_EXTENSIONS: Set[str] = {
+TEXT_EXTENSIONS: set[str] = {
     ".txt",
     ".md",
     ".rst",
@@ -151,7 +150,7 @@ def get_max_memory_bytes() -> int:
     return MAX_MEMORY_MB * 1024 * 1024
 
 
-def get_ignored_dirs() -> Set[str]:
+def get_ignored_dirs() -> set[str]:
     return DEFAULT_IGNORED_DIRS.copy()
 
 
@@ -183,7 +182,7 @@ def validate_path(path: str) -> Path:
 
         return target_path
     except (OSError, RuntimeError) as e:
-        raise ValueError(f"Invalid path '{path}': {e}")
+        raise ValueError(f"Invalid path '{path}': {e}") from e
 
 
 def safe_read_text(file_path: Path) -> str:
@@ -221,7 +220,7 @@ def safe_read_text(file_path: Path) -> str:
         except UnicodeDecodeError:
             continue
         except Exception as e:
-            raise IOError(f"Error reading file {file_path}: {e}")
+            raise OSError(f"Error reading file {file_path}: {e}") from e
 
     raise UnicodeDecodeError(
         'multi-encoding',

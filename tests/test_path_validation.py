@@ -1,11 +1,10 @@
 """Tests for path validation security feature"""
-import sys
 import os
-from pathlib import Path
+import sys
 
 sys.path.append(os.getcwd())
 
-from config import validate_path, PROJECT_ROOT
+from config import PROJECT_ROOT, validate_path
 
 
 def test_valid_paths():

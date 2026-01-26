@@ -1,8 +1,9 @@
 import json
 import shutil
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, from config import MEMORY_FILE, MEMORY_HISTORY_DIR
+from pathlib import Path
+
+from config import MEMORY_FILE, MEMORY_HISTORY_DIR
 from logger import get_logger
 
 logger = get_logger()
@@ -197,7 +198,7 @@ class MemoryManager:
             versions = []
             for meta_file in sorted(self.history_dir.glob("*.meta.json"), reverse=True):
                 try:
-                    with open(meta_file, "r") as f:
+                    with open(meta_file) as f:
                         meta = json.load(f)
 
                     timestamp = meta.get("timestamp", "unknown")

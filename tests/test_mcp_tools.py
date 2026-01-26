@@ -1,32 +1,28 @@
 import os
 import sys
-from pathlib import Path
 
 sys.path.append(os.getcwd())
 
 try:
     from mcp_server import (
-        read_memory,
-        update_memory,
-        clear_memory,
+        analyze_code_complexity,
+        analyze_project_structure,
+        auto_update_memory_from_commits,
         delete_memory_section,
-        index_codebase,
+        extract_tech_stack,
+        generate_project_summary,
+        get_index_stats,
+        get_recent_changes_summary,
+        get_test_coverage_info,
         index_changed_files,
+        index_codebase,
+        ingest_git_history,
+        list_memory_versions,
+        read_memory,
+        save_memory_version,
         search_codebase,
         search_codebase_advanced,
-        get_index_stats,
-        ingest_git_history,
-        generate_project_summary,
-        extract_tech_stack,
-        analyze_project_structure,
-        get_recent_changes_summary,
-        auto_update_memory_from_commits,
-        analyze_code_complexity,
-        analyze_code_quality,
-        get_test_coverage_info,
-        save_memory_version,
-        list_memory_versions,
-        restore_memory_version,
+        update_memory,
     )
 
     print("Successfully imported tools.")

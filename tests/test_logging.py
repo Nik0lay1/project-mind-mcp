@@ -1,12 +1,11 @@
 """Tests for logging system"""
-import sys
 import os
-from pathlib import Path
+import sys
 
 sys.path.append(os.getcwd())
 
-from logger import setup_logger, get_logger
-from config import LOG_FILE, AI_DIR
+from config import LOG_FILE
+from logger import get_logger, setup_logger
 
 
 def test_logger_setup():

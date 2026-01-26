@@ -1,20 +1,20 @@
-import unittest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-import sys
 import os
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
-    validate_path,
-    safe_read_text,
-    get_max_file_size_bytes,
-    get_max_memory_bytes,
-    get_ignored_dirs,
-    PROJECT_ROOT,
     MAX_FILE_SIZE_MB,
     MAX_MEMORY_MB,
+    PROJECT_ROOT,
+    get_ignored_dirs,
+    get_max_file_size_bytes,
+    get_max_memory_bytes,
+    safe_read_text,
+    validate_path,
 )
 
 

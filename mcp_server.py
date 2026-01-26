@@ -1,39 +1,23 @@
 import os
 import sys
-import json
-import shutil
-from pathlib import Path
-from typing import Optional, Set, Dict
-from mcp.server.fastmcp import FastMCP
-import git
 from datetime import datetime, timedelta
+from pathlib import Path
 
+import git
+from mcp.server.fastmcp import FastMCP
+
+from codebase_indexer import CodebaseIndexer
 from config import (
     AI_DIR,
-    MEMORY_FILE,
-    VECTOR_STORE_DIR,
     INDEX_IGNORE_FILE,
-    INDEX_METADATA_FILE,
-    MEMORY_HISTORY_DIR,
-    MODEL_NAME,
-    CHUNK_SIZE,
-    CHUNK_OVERLAP,
-    BATCH_SIZE,
-    BINARY_EXTENSIONS,
-    INDEXABLE_EXTENSIONS,
-    get_max_file_size_bytes,
-    get_max_memory_bytes,
+    MEMORY_FILE,
+    get_file_cache_stats,
     get_ignored_dirs,
     validate_path,
-    safe_read_text,
-    get_file_cache_stats,
 )
-from incremental_indexing import IndexMetadata
-from memory_limited_indexer import MemoryLimitedIndexer
-from vector_store_manager import VectorStoreManager
+from logger import setup_logger
 from memory_manager import MemoryManager
-from codebase_indexer import CodebaseIndexer
-from logger import setup_logger, get_logger
+from vector_store_manager import VectorStoreManager
 
 logger = setup_logger()
 
@@ -114,13 +98,13 @@ mcp = FastMCP("ProjectMind")
 
 
 
-def load_index_ignore_patterns() -> Set[str]:
+def load_index_ignore_patterns() -> set[str]:
     if not INDEX_IGNORE_FILE.exists():
         return set()
 
     try:
         patterns = set()
-        with open(INDEX_IGNORE_FILE, "r") as f:
+        with open(INDEX_IGNORE_FILE) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
@@ -480,8 +464,8 @@ def index_changed_files() -> str:
 def should_include_search_result(
     source: str,
     relevance: float,
-    file_types: Optional[list[str]],
-    exclude_dirs: Optional[list[str]],
+    file_types: list[str] | None,
+    exclude_dirs: list[str] | None,
     min_relevance: float
 ) -> bool:
     """
@@ -532,8 +516,8 @@ def format_search_result(source: str, document: str, relevance: float) -> str:
 def search_codebase_advanced(
     query: str,
     n_results: int = 5,
-    file_types: Optional[list[str]] = None,
-    exclude_dirs: Optional[list[str]] = None,
+    file_types: list[str] | None = None,
+    exclude_dirs: list[str] | None = None,
     min_relevance: float = 0.0,
 ) -> str:
     if not query or not query.strip():
@@ -635,7 +619,6 @@ def auto_update_memory_from_commits(days: int = 7, auto_summarize: bool = True) 
 def analyze_code_complexity(target_path: str = ".") -> str:
     try:
         from radon.complexity import cc_visit
-        from radon.metrics import mi_visit
     except ImportError:
         return "Error: radon not installed. Run: pip install radon"
 
@@ -680,7 +663,7 @@ def analyze_code_complexity(target_path: str = ".") -> str:
                 results.append(f"- `{file}:{name}` - Complexity: {complexity}")
 
         avg_complexity = total_complexity / file_count if file_count > 0 else 0
-        results.append(f"\n## Summary")
+        results.append("\n## Summary")
         results.append(f"- Files analyzed: {file_count}")
         results.append(f"- High complexity functions: {len(high_complexity)}")
         results.append(f"- Average complexity: {avg_complexity:.2f}")
@@ -695,8 +678,9 @@ def analyze_code_complexity(target_path: str = ".") -> str:
 @mcp.tool()
 def analyze_code_quality(target_path: str = ".", max_files: int = 10) -> str:
     try:
-        from pylint.lint import Run
         from io import StringIO
+
+        from pylint.lint import Run
     except ImportError:
         return "Error: pylint not installed. Run: pip install pylint"
 

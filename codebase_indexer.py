@@ -1,22 +1,22 @@
 import os
 from pathlib import Path
-from typing import Set, from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import (
-    CHUNK_SIZE,
-    CHUNK_OVERLAP,
     BATCH_SIZE,
     BINARY_EXTENSIONS,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
     INDEXABLE_EXTENSIONS,
     get_max_file_size_bytes,
     get_max_memory_bytes,
-    get_ignored_dirs,
     safe_read_text,
 )
 from incremental_indexing import IndexMetadata
+from logger import get_logger
 from memory_limited_indexer import MemoryLimitedIndexer
 from vector_store_manager import VectorStoreManager
-from logger import get_logger
 
 logger = get_logger()
 
@@ -40,7 +40,7 @@ class CodebaseIndexer:
             chunk_overlap=CHUNK_OVERLAP
         )
 
-    def should_index_file(self, file_path: Path, ignore_patterns: Set[str]) -> bool:
+    def should_index_file(self, file_path: Path, ignore_patterns: set[str]) -> bool:
         """
         Determines if a file should be indexed.
 
@@ -75,8 +75,8 @@ class CodebaseIndexer:
     def scan_indexable_files(
         self,
         root_dir: Path,
-        ignored_dirs: Set[str],
-        ignore_patterns: Set[str]
+        ignored_dirs: set[str],
+        ignore_patterns: set[str]
     ) -> list[Path]:
         """
         Scans directory tree and returns list of indexable files.
@@ -131,7 +131,7 @@ class CodebaseIndexer:
                 )
 
             return True
-        except (UnicodeDecodeError, IOError) as e:
+        except (OSError, UnicodeDecodeError) as e:
             logger.warning(f"Skipping {file_path}: encoding error - {e}")
             return False
         except Exception as e:
@@ -169,8 +169,8 @@ class CodebaseIndexer:
     def index_all(
         self,
         root_dir: Path,
-        ignored_dirs: Set[str],
-        ignore_patterns: Set[str],
+        ignored_dirs: set[str],
+        ignore_patterns: set[str],
         force: bool = False
     ) -> str:
         """
@@ -221,8 +221,8 @@ class CodebaseIndexer:
     def index_changed(
         self,
         root_dir: Path,
-        ignored_dirs: Set[str],
-        ignore_patterns: Set[str]
+        ignored_dirs: set[str],
+        ignore_patterns: set[str]
     ) -> str:
         """
         Indexes only changed files (incremental indexing).

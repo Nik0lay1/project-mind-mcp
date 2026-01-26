@@ -1,5 +1,7 @@
 import sys
-from typing import Dict, Any, Callable
+from collections.abc import Callable
+from typing import Any
+
 from logger import get_logger
 
 logger = get_logger()
@@ -11,7 +13,7 @@ class MemoryLimitedIndexer:
     Automatically flushes batches when memory threshold is reached.
     """
 
-    def __init__(self, max_memory_bytes: int, batch_callback: Callable[[list[str], list[Dict], list[str]], None]):
+    def __init__(self, max_memory_bytes: int, batch_callback: Callable[[list[str], list[dict], list[str]], None]):
         """
         Args:
             max_memory_bytes: Maximum memory to use for buffering documents
@@ -20,7 +22,7 @@ class MemoryLimitedIndexer:
         self.max_memory_bytes = max_memory_bytes
         self.batch_callback = batch_callback
         self.documents: list[str] = []
-        self.metadatas: list[Dict] = []
+        self.metadatas: list[dict] = []
         self.ids: list[str] = []
         self.current_memory = 0
         self.total_chunks = 0
@@ -40,7 +42,7 @@ class MemoryLimitedIndexer:
 
         return size
 
-    def add_chunk(self, document: str, metadata: Dict[str, Any], doc_id: str) -> None:
+    def add_chunk(self, document: str, metadata: dict[str, Any], doc_id: str) -> None:
         """
         Adds a chunk to the buffer. Flushes if memory limit exceeded.
 
@@ -90,7 +92,7 @@ class MemoryLimitedIndexer:
             self.ids.clear()
             self.current_memory = 0
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Returns indexing statistics.
 

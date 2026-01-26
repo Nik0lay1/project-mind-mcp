@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Test MCP server stdio communication"""
 
-import subprocess
 import json
+import subprocess
 import sys
+
 
 def test_mcp_server():
     """Test basic MCP server communication"""

@@ -2,13 +2,10 @@
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import Optional
 
-from config import LOG_FILE, LOG_MAX_BYTES, LOG_BACKUP_COUNT, AI_DIR
+from config import AI_DIR, LOG_BACKUP_COUNT, LOG_FILE, LOG_MAX_BYTES
 
-
-_logger: Optional[logging.Logger] = None
+_logger: logging.Logger | None = None
 
 
 def setup_logger(name: str = "ProjectMind") -> logging.Logger:

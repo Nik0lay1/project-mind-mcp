@@ -1,8 +1,9 @@
 import os
 import sys
+
 sys.path.append(os.getcwd())
 
-from mcp_server import search_codebase, get_index_stats
+from mcp_server import get_index_stats, search_codebase
 
 print("Testing search functionality...")
 

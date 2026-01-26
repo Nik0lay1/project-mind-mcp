@@ -1,7 +1,7 @@
-import unittest
-from unittest.mock import MagicMock, call
-import sys
 import os
+import sys
+import unittest
+from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -49,10 +49,10 @@ class TestMemoryLimitedIndexer(unittest.TestCase):
     def test_flush_calls_callback(self):
         """Test that flush calls the callback with correct data"""
         received_data = []
-        
+
         def capture_callback(docs, metas, ids):
             received_data.append((docs.copy(), metas.copy(), ids.copy()))
-        
+
         indexer = MemoryLimitedIndexer(self.max_memory, capture_callback)
 
         indexer.add_chunk("doc1", {"source": "file1.py"}, "id1")
@@ -191,7 +191,6 @@ class TestMemoryLimitedIndexer(unittest.TestCase):
             if i % 3 == 2:
                 indexer.flush()
 
-        final_flush_count = indexer.total_batches
         indexer.flush()
 
         self.assertEqual(indexer.total_chunks, 10)
