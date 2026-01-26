@@ -164,3 +164,37 @@ def validate_path(path: str) -> Path:
         return target_path
     except (OSError, RuntimeError) as e:
         raise ValueError(f"Invalid path '{path}': {e}")
+
+
+def safe_read_text(file_path: Path) -> str:
+    """
+    Safely reads text file with automatic encoding detection.
+    Tries multiple encodings instead of ignoring errors.
+    
+    Args:
+        file_path: Path to the file to read
+        
+    Returns:
+        File content as string
+        
+    Raises:
+        UnicodeDecodeError: If file cannot be decoded with any supported encoding
+        IOError: If file cannot be read
+    """
+    encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1']
+    
+    for encoding in encodings:
+        try:
+            return file_path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            raise IOError(f"Error reading file {file_path}: {e}")
+    
+    raise UnicodeDecodeError(
+        'multi-encoding',
+        b'',
+        0,
+        1,
+        f"Cannot decode {file_path} with any supported encoding: {encodings}"
+    )

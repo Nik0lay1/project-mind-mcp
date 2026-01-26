@@ -1,0 +1,8 @@
+feat: Improve Unicode handling with multi-encoding support
+
+- Added safe_read_text() function with automatic encoding detection
+- Tries UTF-8, UTF-8-sig, Latin-1, CP1252, and ISO-8859-1
+- Replaced errors='ignore' with proper encoding fallback
+- Added comprehensive Unicode handling tests
+- Better error reporting for encoding issues
+- All Unicode tests pass successfully

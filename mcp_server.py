@@ -24,6 +24,7 @@ from config import (
     get_max_file_size_bytes,
     get_ignored_dirs,
     validate_path,
+    safe_read_text,
 )
 from incremental_indexing import IndexMetadata
 
@@ -311,7 +312,7 @@ def index_codebase(force: bool = False) -> str:
                 continue
 
             try:
-                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                content = safe_read_text(file_path)
                 if not content.strip():
                     continue
 
@@ -325,6 +326,8 @@ def index_codebase(force: bool = False) -> str:
                 file_count += 1
                 chunk_count += len(chunks)
 
+            except (UnicodeDecodeError, IOError) as e:
+                log(f"Skipping {file_path}: {e}")
             except Exception as e:
                 log(f"Skipping {file_path}: {e}")
 
@@ -685,7 +688,7 @@ def index_changed_files() -> str:
 
     for file_path in changed_files:
         try:
-            content = file_path.read_text(encoding="utf-8", errors="ignore")
+            content = safe_read_text(file_path)
             if not content.strip():
                 continue
 
@@ -702,6 +705,8 @@ def index_changed_files() -> str:
             file_count += 1
             chunk_count += len(chunks)
 
+        except (UnicodeDecodeError, IOError) as e:
+            log(f"Skipping {file_path}: {e}")
         except Exception as e:
             log(f"Skipping {file_path}: {e}")
 
