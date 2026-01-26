@@ -34,9 +34,11 @@ def test_invalid_paths():
     test_cases = [
         ("../../etc/passwd", "Parent directory traversal"),
         ("/etc/passwd", "Absolute path outside project"),
-        ("C:\\Windows\\System32", "Windows system path"),
         ("", "Empty path"),
     ]
+
+    if os.name == "nt":
+        test_cases.append(("C:\\Windows\\System32", "Windows system path"))
 
     for path, description in test_cases:
         try:
