@@ -10,6 +10,9 @@ VECTOR_STORE_DIR = AI_DIR / "vector_store"
 INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
 INDEX_METADATA_FILE = AI_DIR / "index_metadata.json"
 MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
+LOG_FILE = AI_DIR / "projectmind.log"
+LOG_MAX_BYTES = 10 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 

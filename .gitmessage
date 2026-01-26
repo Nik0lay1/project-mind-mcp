@@ -1,8 +1,10 @@
-feat: Improve Unicode handling with multi-encoding support
+feat: Add centralized logging system with file rotation
 
-- Added safe_read_text() function with automatic encoding detection
-- Tries UTF-8, UTF-8-sig, Latin-1, CP1252, and ISO-8859-1
-- Replaced errors='ignore' with proper encoding fallback
-- Added comprehensive Unicode handling tests
-- Better error reporting for encoding issues
-- All Unicode tests pass successfully
+- Created logger.py with RotatingFileHandler
+- Logs stored in .ai/projectmind.log
+- 10MB max size per log file, 5 backup files
+- Both file and stderr output
+- Structured logging with timestamps and context
+- Added comprehensive logging tests
+- Replaced simple stderr logging with proper logger
+- Better error tracking and debugging capabilities

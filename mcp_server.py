@@ -27,15 +27,18 @@ from config import (
     safe_read_text,
 )
 from incremental_indexing import IndexMetadata
+from logger import setup_logger, get_logger
 
 chroma_client = None
 collection = None
 embedding_fn = None
 
+logger = setup_logger()
+
 
 def log(message: str) -> None:
-    sys.stderr.write(f"[ProjectMind] {message}\n")
-    sys.stderr.flush()
+    """Backward compatible log function"""
+    logger.info(message)
 
 
 def startup_check() -> None:
@@ -127,10 +130,10 @@ def get_vector_store():
         collection = chroma_client.get_or_create_collection(
             name="project_codebase", embedding_function=embedding_fn
         )
-        log("Vector Store initialized.")
+        logger.info("Vector Store initialized successfully")
         return collection
     except Exception as e:
-        log(f"Error initializing ChromaDB: {e}")
+        logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
         return None
 
 
@@ -327,9 +330,9 @@ def index_codebase(force: bool = False) -> str:
                 chunk_count += len(chunks)
 
             except (UnicodeDecodeError, IOError) as e:
-                log(f"Skipping {file_path}: {e}")
+                logger.warning(f"Skipping {file_path}: encoding error - {e}")
             except Exception as e:
-                log(f"Skipping {file_path}: {e}")
+                logger.error(f"Unexpected error indexing {file_path}: {e}", exc_info=True)
 
     if documents:
         log(f"Indexing {len(documents)} chunks from {file_count} files...")
@@ -706,9 +709,9 @@ def index_changed_files() -> str:
             chunk_count += len(chunks)
 
         except (UnicodeDecodeError, IOError) as e:
-            log(f"Skipping {file_path}: {e}")
+            logger.warning(f"Skipping {file_path}: encoding error - {e}")
         except Exception as e:
-            log(f"Skipping {file_path}: {e}")
+            logger.error(f"Unexpected error indexing changed file {file_path}: {e}", exc_info=True)
 
     if documents:
         log(f"Indexing {len(documents)} chunks from {file_count} files...")
