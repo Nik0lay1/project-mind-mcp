@@ -4,6 +4,8 @@ from typing import Set
 
 PROJECT_ROOT = Path.cwd().resolve()
 
+_file_cache = None
+
 AI_DIR = Path(".ai")
 MEMORY_FILE = AI_DIR / "memory.md"
 VECTOR_STORE_DIR = AI_DIR / "vector_store"
@@ -188,6 +190,7 @@ def safe_read_text(file_path: Path) -> str:
     """
     Safely reads text file with automatic encoding detection.
     Tries multiple encodings instead of ignoring errors.
+    Uses FileCache for improved performance.
     
     Args:
         file_path: Path to the file to read
@@ -199,11 +202,22 @@ def safe_read_text(file_path: Path) -> str:
         UnicodeDecodeError: If file cannot be decoded with any supported encoding
         IOError: If file cannot be read
     """
+    global _file_cache
+    if _file_cache is None:
+        from cache_manager import FileCache
+        _file_cache = FileCache(capacity=50)
+    
+    cached_content = _file_cache.get(file_path)
+    if cached_content is not None:
+        return cached_content
+    
     encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1']
     
     for encoding in encodings:
         try:
-            return file_path.read_text(encoding=encoding)
+            content = file_path.read_text(encoding=encoding)
+            _file_cache.put(file_path, content)
+            return content
         except UnicodeDecodeError:
             continue
         except Exception as e:
@@ -216,3 +230,17 @@ def safe_read_text(file_path: Path) -> str:
         1,
         f"Cannot decode {file_path} with any supported encoding: {encodings}"
     )
+
+
+def get_file_cache_stats():
+    """
+    Returns file cache statistics.
+    
+    Returns:
+        Dictionary with cache statistics
+    """
+    global _file_cache
+    if _file_cache is None:
+        from cache_manager import FileCache
+        _file_cache = FileCache(capacity=50)
+    return _file_cache.get_stats()

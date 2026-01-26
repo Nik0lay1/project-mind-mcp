@@ -26,6 +26,7 @@ from config import (
     get_ignored_dirs,
     validate_path,
     safe_read_text,
+    get_file_cache_stats,
 )
 from incremental_indexing import IndexMetadata
 from memory_limited_indexer import MemoryLimitedIndexer
@@ -813,6 +814,35 @@ def list_memory_versions() -> str:
 @mcp.tool()
 def restore_memory_version(timestamp: str) -> str:
     return memory_manager.restore_version(timestamp)
+
+
+@mcp.tool()
+def get_cache_stats() -> str:
+    """
+    Returns performance statistics for all caches.
+    
+    Returns:
+        Formatted string with cache statistics
+    """
+    file_stats = get_file_cache_stats()
+    query_stats = vector_store.get_query_cache_stats()
+    
+    result = "# CACHE STATISTICS\n\n"
+    result += "## File Cache (safe_read_text)\n"
+    result += f"- **Hits**: {file_stats['hits']}\n"
+    result += f"- **Misses**: {file_stats['misses']}\n"
+    result += f"- **Hit Rate**: {file_stats['hit_rate']}\n"
+    result += f"- **Size**: {file_stats['size']}/{file_stats['capacity']}\n\n"
+    
+    result += "## Query Cache (vector search)\n"
+    result += f"- **Hits**: {query_stats['hits']}\n"
+    result += f"- **Misses**: {query_stats['misses']}\n"
+    result += f"- **Hit Rate**: {query_stats['hit_rate']}\n"
+    result += f"- **Size**: {query_stats['size']}/{query_stats['max_size']}\n"
+    result += f"- **Expirations**: {query_stats['expirations']}\n"
+    result += f"- **TTL**: {query_stats['ttl_seconds']}s\n"
+    
+    return result
 
 
 if __name__ == "__main__":
