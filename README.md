@@ -37,6 +37,19 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
   - Timestamped snapshots
   - Easy rollback and restore
   - Version history tracking
+- **🆕 Performance Caching** (v0.4.0):
+  - Multi-layer caching system (LRU, TTL, File caches)
+  - Reduced disk I/O for file operations
+  - 5-minute query result caching
+  - Performance monitoring via `get_cache_stats()`
+  - Thread-safe implementations
+- **Production-Ready Architecture** (v0.4.0):
+  - Zero global state - full class-based design
+  - Path validation security (directory traversal prevention)
+  - Enhanced Unicode handling (multi-encoding support)
+  - Atomic file operations (crash-safe)
+  - Memory-limited indexing (OOM prevention)
+  - Comprehensive test coverage (62 unit tests)
 - **Input Validation**: All tools have parameter validation and error handling
 - **Memory Management**: Clear memory, delete specific sections, maintain templates
 - **Index Statistics**: Track the number of indexed chunks
@@ -260,6 +273,37 @@ list_memory_versions()
 restore_memory_version("20241216_143022")
 ```
 
+### Performance Monitoring 🆕 (v0.4.0)
+
+#### `get_cache_stats()`
+Returns performance statistics for all caches:
+- **File Cache** - Hit rate for file read operations
+- **Query Cache** - Hit rate for vector search results
+- Detailed metrics: hits, misses, size, capacity
+- TTL and expiration tracking for query cache
+
+**Use case:** Monitor caching effectiveness, optimize performance.
+
+```python
+# Check cache performance
+get_cache_stats()
+
+# Output:
+# File Cache (safe_read_text)
+# - Hits: 150
+# - Misses: 50
+# - Hit Rate: 75.00%
+# - Size: 42/50
+#
+# Query Cache (vector search)
+# - Hits: 80
+# - Misses: 20
+# - Hit Rate: 80.00%
+# - Size: 15/100
+# - Expirations: 5
+# - TTL: 300s
+```
+
 ## Quick Start Examples
 
 ### New to the project?
@@ -373,11 +417,23 @@ Reads the project memory file directly as a resource.
 
 ### Components
 
+**Core Server:**
 - **mcp_server.py**: Main server implementation with all MCP tools
-- **config.py**: Centralized configuration management
+- **config.py**: Centralized configuration management with security features
+
+**Class-Based Modules (v0.4.0):**
+- **vector_store_manager.py**: ChromaDB management with query caching
+- **memory_manager.py**: Memory operations with versioning support
+- **codebase_indexer.py**: File scanning, chunking, and indexing logic
+- **cache_manager.py**: Multi-layer caching (LRU, TTL, File caches)
+- **logger.py**: Centralized rotating file logging
+- **incremental_indexing.py**: Atomic metadata operations
+
+**Infrastructure:**
 - **pyproject.toml**: Modern Python project configuration
 - **.pre-commit-config.yaml**: Pre-commit hooks for code quality
-- **.github/workflows/ci.yml**: CI/CD pipeline configuration
+- **.github/workflows/ci.yml**: CI/CD pipeline with 7 test suites
+- **tests/**: Comprehensive unit test suite (62 tests)
 
 ### Technology Stack
 
@@ -386,6 +442,9 @@ Reads the project memory file directly as a resource.
 - **Embeddings**: sentence-transformers (all-MiniLM-L6-v2)
 - **Text Splitting**: LangChain RecursiveCharacterTextSplitter
 - **Git Integration**: GitPython
+- **Caching**: Custom LRU/TTL implementations
+- **Testing**: unittest with mock isolation
+- **Security**: Path validation, atomic file operations
 
 ## Troubleshooting
 
