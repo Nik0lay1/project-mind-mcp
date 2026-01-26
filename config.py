@@ -20,6 +20,7 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 100
 BATCH_SIZE = 100
 MAX_FILE_SIZE_MB = 10
+MAX_MEMORY_MB = 100
 
 DEFAULT_IGNORED_DIRS: Set[str] = {
     ".git",
@@ -132,6 +133,20 @@ def get_max_file_size_bytes() -> int:
         except ValueError:
             pass
     return MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+def get_max_memory_bytes() -> int:
+    """
+    Get maximum memory limit for document processing in bytes.
+    Can be overridden via PROJECTMIND_MAX_MEMORY_MB environment variable.
+    """
+    env_size = os.getenv("PROJECTMIND_MAX_MEMORY_MB")
+    if env_size:
+        try:
+            return int(env_size) * 1024 * 1024
+        except ValueError:
+            pass
+    return MAX_MEMORY_MB * 1024 * 1024
 
 
 def get_ignored_dirs() -> Set[str]:

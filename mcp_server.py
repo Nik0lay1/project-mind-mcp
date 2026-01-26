@@ -22,11 +22,13 @@ from config import (
     BINARY_EXTENSIONS,
     INDEXABLE_EXTENSIONS,
     get_max_file_size_bytes,
+    get_max_memory_bytes,
     get_ignored_dirs,
     validate_path,
     safe_read_text,
 )
 from incremental_indexing import IndexMetadata
+from memory_limited_indexer import MemoryLimitedIndexer
 from logger import setup_logger, get_logger
 
 chroma_client = None
@@ -293,17 +295,25 @@ def index_codebase(force: bool = False) -> str:
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
-    documents = []
-    metadatas = []
-    ids = []
+    def batch_upsert(documents, metadatas, ids):
+        """Callback for flushing batches to ChromaDB"""
+        for i in range(0, len(documents), BATCH_SIZE):
+            end = min(i + BATCH_SIZE, len(documents))
+            collection.upsert(
+                documents=documents[i:end],
+                metadatas=metadatas[i:end],
+                ids=ids[i:end]
+            )
+
+    max_memory = get_max_memory_bytes()
+    indexer = MemoryLimitedIndexer(max_memory, batch_upsert)
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     )
 
-    log("Scanning files...")
+    log(f"Scanning files (memory limit: {max_memory / 1024 / 1024:.0f} MB)...")
     file_count = 0
-    chunk_count = 0
 
     for root, dirs, files in os.walk(root_dir):
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
@@ -322,32 +332,23 @@ def index_codebase(force: bool = False) -> str:
                 chunks = text_splitter.split_text(content)
 
                 for i, chunk in enumerate(chunks):
-                    documents.append(chunk)
-                    metadatas.append({"source": str(file_path), "chunk_index": i})
-                    ids.append(f"{file_path}_{i}")
+                    indexer.add_chunk(
+                        chunk,
+                        {"source": str(file_path), "chunk_index": i},
+                        f"{file_path}_{i}"
+                    )
 
                 file_count += 1
-                chunk_count += len(chunks)
 
             except (UnicodeDecodeError, IOError) as e:
                 logger.warning(f"Skipping {file_path}: encoding error - {e}")
             except Exception as e:
                 logger.error(f"Unexpected error indexing {file_path}: {e}", exc_info=True)
 
-    if documents:
-        log(f"Indexing {len(documents)} chunks from {file_count} files...")
-        try:
-            for i in range(0, len(documents), BATCH_SIZE):
-                end = min(i + BATCH_SIZE, len(documents))
-                collection.upsert(
-                    documents=documents[i:end], metadatas=metadatas[i:end], ids=ids[i:end]
-                )
-            return f"Indexed {file_count} files ({chunk_count} chunks)."
-        except Exception as e:
-            log(f"Error during indexing: {e}")
-            return f"Error during indexing: {e}"
-    else:
-        return "No documents found to index."
+    indexer.flush()
+    
+    stats = indexer.get_stats()
+    return f"Indexed {file_count} files ({stats['total_chunks']} chunks in {stats['total_batches']} batches)."
 
 
 @mcp.tool()
@@ -677,17 +678,25 @@ def index_changed_files() -> str:
     if not changed_files:
         return "No changed files to index."
 
-    documents = []
-    metadatas = []
-    ids = []
+    def batch_upsert(documents, metadatas, ids):
+        """Callback for flushing batches to ChromaDB"""
+        for i in range(0, len(documents), BATCH_SIZE):
+            end = min(i + BATCH_SIZE, len(documents))
+            collection.upsert(
+                documents=documents[i:end],
+                metadatas=metadatas[i:end],
+                ids=ids[i:end]
+            )
+
+    max_memory = get_max_memory_bytes()
+    indexer = MemoryLimitedIndexer(max_memory, batch_upsert)
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     )
 
-    log(f"Found {len(changed_files)} changed files...")
+    log(f"Found {len(changed_files)} changed files (memory limit: {max_memory / 1024 / 1024:.0f} MB)...")
     file_count = 0
-    chunk_count = 0
 
     for file_path in changed_files:
         try:
@@ -698,41 +707,30 @@ def index_changed_files() -> str:
             chunks = text_splitter.split_text(content)
 
             for i, chunk in enumerate(chunks):
-                documents.append(chunk)
-                metadatas.append({"source": str(file_path), "chunk_index": i})
-                ids.append(f"{file_path}_{i}")
+                indexer.add_chunk(
+                    chunk,
+                    {"source": str(file_path), "chunk_index": i},
+                    f"{file_path}_{i}"
+                )
 
             mtime = file_path.stat().st_mtime
             metadata.update_file(str(file_path), mtime)
 
             file_count += 1
-            chunk_count += len(chunks)
 
         except (UnicodeDecodeError, IOError) as e:
             logger.warning(f"Skipping {file_path}: encoding error - {e}")
         except Exception as e:
             logger.error(f"Unexpected error indexing changed file {file_path}: {e}", exc_info=True)
 
-    if documents:
-        log(f"Indexing {len(documents)} chunks from {file_count} files...")
-        try:
-            for i in range(0, len(documents), BATCH_SIZE):
-                end = min(i + BATCH_SIZE, len(documents))
-                collection.upsert(
-                    documents=documents[i:end], metadatas=metadatas[i:end], ids=ids[i:end]
-                )
+    indexer.flush()
 
-            existing_files = {str(f) for f in all_files}
-            metadata.remove_deleted_files(existing_files)
-            metadata.save()
+    existing_files = {str(f) for f in all_files}
+    metadata.remove_deleted_files(existing_files)
+    metadata.save()
 
-            return f"Incrementally indexed {file_count} changed files ({chunk_count} chunks)."
-        except Exception as e:
-            log(f"Error during indexing: {e}")
-            return f"Error during indexing: {e}"
-    else:
-        metadata.save()
-        return "No documents found to index."
+    stats = indexer.get_stats()
+    return f"Incrementally indexed {file_count} changed files ({stats['total_chunks']} chunks in {stats['total_batches']} batches)."
 
 
 @mcp.tool()
