@@ -46,22 +46,22 @@ jobs:
       continue-on-error: true
 
     - name: Run security tests
-      run: python test_path_validation.py
+      run: python tests/test_path_validation.py
 
     - name: Run Unicode tests
-      run: python test_unicode_handling.py
+      run: python tests/test_unicode_handling.py
 
     - name: Run logging tests
-      run: python test_logging.py
+      run: python tests/test_logging.py
 
     - name: Run transactional save tests
-      run: python test_transactional_save.py
+      run: python tests/test_transactional_save.py
 
     - name: Run memory limit tests
-      run: python test_memory_limits.py
+      run: python tests/test_memory_limits.py
 
     - name: Run integration tests
-      run: python test_mcp_tools.py
+      run: python tests/test_mcp_tools.py
 
   security:
     runs-on: ubuntu-latest
