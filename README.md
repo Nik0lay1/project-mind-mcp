@@ -97,7 +97,45 @@ python mcp_server.py
 
 ## IDE Configuration
 
-To use ProjectMind with your IDE (e.g., Cursor, VS Code), add it to your MCP config.
+### Zencoder.ai
+
+Add ProjectMind as a custom MCP server in Zencoder's Tools settings:
+
+```json
+{
+  "type": "stdio",
+  "command": "/absolute/path/to/your/project/.venv/Scripts/python.exe",
+  "args": [
+    "/absolute/path/to/your/project/mcp_server.py"
+  ]
+}
+```
+
+**Windows Example:**
+```json
+{
+  "type": "stdio",
+  "command": "f:/Projects/YourProject/.venv/Scripts/python.exe",
+  "args": [
+    "f:/Projects/YourProject/mcp_server.py"
+  ]
+}
+```
+
+**macOS/Linux Example:**
+```json
+{
+  "type": "stdio",
+  "command": "/home/user/projects/yourproject/.venv/bin/python",
+  "args": [
+    "/home/user/projects/yourproject/mcp_server.py"
+  ]
+}
+```
+
+### Claude Desktop / Cursor / VS Code
+
+To use ProjectMind with other IDEs, add it to your MCP config.
 
 **Command:** `uv`  
 **Args:** `run`, `/absolute/path/to/mcp_server.py`

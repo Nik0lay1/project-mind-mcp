@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.1] - 2026-01-27 🐛 CRITICAL BUG FIXES
+
+### Fixed
+- **Missing `os` import** causing immediate server crash
+  - Server was using `os.getcwd()` in 5 locations without importing the `os` module
+  - Caused `NameError` crash during `startup_check()` at module load time
+  - Prevented MCP server from starting in any IDE integration
+  - Fixed by adding `import os` to mcp_server.py imports
+
+### Documentation
+- **Added Zencoder.ai IDE integration guide** to README
+  - Complete configuration examples for Windows/macOS/Linux
+  - Proper `stdio` type configuration format
+  - Working examples with absolute paths
+
 ## [0.4.0] - 2026-01-26 🎯 PRODUCTION-READY REFACTORING
 
 ### 🏗️ Complete Architecture Overhaul (Stages 1-10)
