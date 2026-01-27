@@ -11,6 +11,7 @@ from config import (
     AI_DIR,
     INDEX_IGNORE_FILE,
     MEMORY_FILE,
+    PROJECT_ROOT,
     get_file_cache_stats,
     get_ignored_dirs,
     validate_path,
@@ -32,7 +33,8 @@ def log(message: str) -> None:
 
 
 def startup_check() -> None:
-    log(f"Running startup check in {os.getcwd()}...")
+    log(f"Running startup check in project root: {PROJECT_ROOT}")
+    log(f"Current working directory: {os.getcwd()}")
 
     try:
         if not AI_DIR.exists():
@@ -42,7 +44,7 @@ def startup_check() -> None:
         log(f"Warning: Could not create {AI_DIR}: {e}. Server will continue if directory exists.")
 
     try:
-        gitignore_path = Path(".gitignore")
+        gitignore_path = PROJECT_ROOT / ".gitignore"
         ai_ignored = False
         pycache_ignored = False
 
@@ -142,7 +144,7 @@ def index_codebase(force: bool = False) -> str:
     if vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
-    root_dir = Path(".")
+    root_dir = PROJECT_ROOT
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
@@ -272,7 +274,7 @@ def generate_project_summary() -> str:
         except Exception:
             pass
 
-        root = Path(".")
+        root = PROJECT_ROOT
         py_files = len(list(root.rglob("*.py")))
         js_files = len(list(root.rglob("*.js"))) + len(list(root.rglob("*.ts")))
 
@@ -348,7 +350,7 @@ def extract_tech_stack() -> str:
 @mcp.tool()
 def analyze_project_structure() -> str:
     try:
-        root = Path(".")
+        root = PROJECT_ROOT
         ignored_dirs = get_ignored_dirs()
 
         structure = []
@@ -458,7 +460,7 @@ def index_changed_files() -> str:
     if vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
-    root_dir = Path(".")
+    root_dir = PROJECT_ROOT
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 

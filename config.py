@@ -1,11 +1,13 @@
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path.cwd().resolve()
+# Use script location as project root, not current working directory
+# This ensures the server works correctly when launched from any directory
+PROJECT_ROOT = Path(__file__).parent.resolve()
 
 _file_cache = None
 
-AI_DIR = Path(".ai")
+AI_DIR = PROJECT_ROOT / ".ai"
 MEMORY_FILE = AI_DIR / "memory.md"
 VECTOR_STORE_DIR = AI_DIR / "vector_store"
 INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
@@ -160,7 +162,7 @@ def validate_path(path: str) -> Path:
     Prevents path traversal attacks.
 
     Args:
-        path: Path string to validate
+        path: Path string to validate. "." refers to PROJECT_ROOT.
 
     Returns:
         Resolved Path object
@@ -172,7 +174,15 @@ def validate_path(path: str) -> Path:
         if not path or not isinstance(path, str):
             raise ValueError("Path must be a non-empty string")
 
-        target_path = Path(path).resolve()
+        # Handle "." as project root, not current working directory
+        if path == ".":
+            return PROJECT_ROOT
+
+        # Resolve path relative to PROJECT_ROOT if it's not absolute
+        if not Path(path).is_absolute():
+            target_path = (PROJECT_ROOT / path).resolve()
+        else:
+            target_path = Path(path).resolve()
 
         if not target_path.is_relative_to(PROJECT_ROOT):
             raise ValueError(
