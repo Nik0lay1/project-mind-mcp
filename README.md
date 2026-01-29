@@ -43,13 +43,17 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
   - 5-minute query result caching
   - Performance monitoring via `get_cache_stats()`
   - Thread-safe implementations
-- **Production-Ready Architecture** (v0.4.0):
+- **Production-Ready Architecture** (v0.5.0):
+  - **Dependency Injection** - `AppContext` replaces global singletons for better testability
+  - **Custom Exception Hierarchy** - Domain-specific exceptions for better error handling
+  - **Git Utilities Module** - Reusable git operations eliminating code duplication
+  - **Structured Logging** - Enhanced logging with JSON context fields
   - Zero global state - full class-based design
   - Path validation security (directory traversal prevention)
   - Enhanced Unicode handling (multi-encoding support)
   - Atomic file operations (crash-safe)
   - Memory-limited indexing (OOM prevention)
-  - Comprehensive test coverage (62 unit tests)
+  - Comprehensive test coverage (131 unit tests, 100% pass rate)
 - **Input Validation**: All tools have parameter validation and error handling
 - **Memory Management**: Clear memory, delete specific sections, maintain templates
 - **Index Statistics**: Track the number of indexed chunks

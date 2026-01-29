@@ -1,6 +1,6 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -14,7 +14,6 @@ from config import (
     get_max_memory_bytes,
     safe_read_text,
 )
-from exceptions import IndexError
 from incremental_indexing import IndexMetadata
 from logger import get_logger
 from memory_limited_indexer import MemoryLimitedIndexer

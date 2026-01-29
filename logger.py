@@ -4,7 +4,6 @@ import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from typing import Any
 
 from config import AI_DIR, LOG_BACKUP_COUNT, LOG_FILE, LOG_MAX_BYTES
 
