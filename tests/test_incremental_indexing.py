@@ -183,8 +183,11 @@ class TestIndexMetadata(unittest.TestCase):
         self.assertEqual(stats["total_files"], 2)
         self.assertEqual(stats["last_index"], "2024-01-01T11:00:00")
 
-    def test_get_stats_empty(self):
+    @patch("incremental_indexing.INDEX_METADATA_FILE")
+    def test_get_stats_empty(self, mock_file):
         """Test getting stats for empty metadata"""
+        mock_file.exists.return_value = False
+
         metadata = IndexMetadata()
 
         stats = metadata.get_stats()

@@ -3,10 +3,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import git
 from mcp.server.fastmcp import FastMCP
 
-from codebase_indexer import CodebaseIndexer
 from config import (
     AI_DIR,
     INDEX_IGNORE_FILE,
@@ -16,15 +14,12 @@ from config import (
     get_ignored_dirs,
     validate_path,
 )
+from context import get_context
+from exceptions import GitError
+from git_utils import GitRepository
 from logger import setup_logger
-from memory_manager import MemoryManager
-from vector_store_manager import VectorStoreManager
 
 logger = setup_logger()
-
-vector_store = VectorStoreManager()
-memory_manager = MemoryManager()
-indexer = CodebaseIndexer(vector_store)
 
 
 def log(message: str) -> None:
@@ -116,39 +111,45 @@ def load_index_ignore_patterns() -> set[str]:
 
 @mcp.resource("project://memory")
 def get_project_memory() -> str:
-    return memory_manager.read()
+    ctx = get_context()
+    return ctx.memory_manager.read()
 
 
 @mcp.tool()
 def read_memory() -> str:
-    return memory_manager.read()
+    ctx = get_context()
+    return ctx.memory_manager.read()
 
 
 @mcp.tool()
 def update_memory(content: str, section: str = "Recent Decisions") -> str:
-    return memory_manager.update(content, section)
+    ctx = get_context()
+    return ctx.memory_manager.update(content, section)
 
 
 @mcp.tool()
 def clear_memory(keep_template: bool = True) -> str:
-    return memory_manager.clear(keep_template)
+    ctx = get_context()
+    return ctx.memory_manager.clear(keep_template)
 
 
 @mcp.tool()
 def delete_memory_section(section_name: str) -> str:
-    return memory_manager.delete_section(section_name)
+    ctx = get_context()
+    return ctx.memory_manager.delete_section(section_name)
 
 
 @mcp.tool()
 def index_codebase(force: bool = False) -> str:
-    if vector_store.get_collection() is None:
+    ctx = get_context()
+    if ctx.vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
     root_dir = PROJECT_ROOT
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
-    return indexer.index_all(root_dir, ignored_dirs, ignore_patterns, force)
+    return ctx.indexer.index_all(root_dir, ignored_dirs, ignore_patterns, force)
 
 
 @mcp.tool()
@@ -163,7 +164,8 @@ def search_codebase(query: str, n_results: int = 5) -> str:
         return "Error: n_results cannot exceed 50."
 
     try:
-        results = vector_store.query(query_texts=[query], n_results=n_results)
+        ctx = get_context()
+        results = ctx.vector_store.query(query_texts=[query], n_results=n_results)
 
         if results is None:
             return "Vector store not initialized."
@@ -191,11 +193,10 @@ def ingest_git_history(limit: int = 30) -> str:
         return "Error: Limit cannot exceed 1000."
 
     try:
-        repo = git.Repo(os.getcwd(), search_parent_directories=True)
-    except git.InvalidGitRepositoryError:
-        return "Current directory is not a git repository."
-    except Exception as e:
-        return f"Error accessing git repository: {e}"
+        git_repo = GitRepository()
+        commits = git_repo.get_commits(max_count=limit)
+    except GitError as e:
+        return str(e)
 
     if not MEMORY_FILE.exists():
         return "Memory file not found."
@@ -211,17 +212,12 @@ def ingest_git_history(limit: int = 30) -> str:
 
         new_entries = []
 
-        for commit in repo.iter_commits(max_count=limit):
-            short_hash = commit.hexsha[:7]
-
-            if short_hash in current_memory:
+        for commit in commits:
+            if commit.short_hash in current_memory:
                 continue
 
-            date_str = datetime.fromtimestamp(commit.committed_date).strftime("%Y-%m-%d %H:%M")
-            message = commit.message.strip().replace("\n", " ")
-            author = commit.author.name
-
-            entry = f"- **{date_str}** [{short_hash}]: {message} (*{author}*)"
+            message = commit.message.replace("\n", " ")
+            entry = f"- **{commit.date_str}** [{commit.short_hash}]: {message} (*{commit.author}*)"
             new_entries.append(entry)
 
         if not new_entries:
@@ -241,7 +237,8 @@ def ingest_git_history(limit: int = 30) -> str:
 
 @mcp.tool()
 def get_index_stats() -> str:
-    count = vector_store.get_count()
+    ctx = get_context()
+    count = ctx.vector_store.get_count()
     if count is None:
         return "Vector store not initialized."
     return f"Vector store contains {count} chunks."
@@ -263,15 +260,13 @@ def generate_project_summary() -> str:
                 summary_parts.append("\n... (truncated, see full memory)\n")
 
         try:
-            repo = git.Repo(os.getcwd(), search_parent_directories=True)
-            commits = list(repo.iter_commits(max_count=5))
+            git_repo = GitRepository()
+            commits = git_repo.get_commits(max_count=5)
             if commits:
                 summary_parts.append("\n## Recent Activity (Last 5 Commits)")
                 for commit in commits:
-                    date_str = datetime.fromtimestamp(commit.committed_date).strftime("%Y-%m-%d")
-                    message = commit.message.strip().split("\n")[0][:80]
-                    summary_parts.append(f"- {date_str}: {message}")
-        except Exception:
+                    summary_parts.append(f"- {commit.date_short}: {commit.first_line[:80]}")
+        except GitError:
             pass
 
         root = PROJECT_ROOT
@@ -408,47 +403,24 @@ def get_recent_changes_summary(days: int = 7) -> str:
         return "Error: days must be between 1 and 365"
 
     try:
-        repo = git.Repo(os.getcwd(), search_parent_directories=True)
-    except git.InvalidGitRepositoryError:
-        return "Not a git repository"
-    except Exception as e:
-        return f"Error accessing git: {e}"
+        git_repo = GitRepository()
+        commits = git_repo.get_commits(max_count=100, since_days=days)
+    except GitError as e:
+        return str(e)
+
+    if not commits:
+        return f"No commits found in the last {days} days"
 
     try:
-        from datetime import timedelta
-
-        cutoff_date = datetime.now() - timedelta(days=days)
-
-        commits = []
-        for commit in repo.iter_commits(max_count=100):
-            commit_date = datetime.fromtimestamp(commit.committed_date)
-            if commit_date < cutoff_date:
-                break
-            commits.append(commit)
-
-        if not commits:
-            return f"No commits found in the last {days} days"
-
         summary = [f"# CHANGES IN LAST {days} DAYS\n"]
         summary.append(f"Total commits: {len(commits)}\n")
 
-        authors = {}
-        for commit in commits:
-            author = commit.author.name
-            authors[author] = authors.get(author, 0) + 1
-
+        author_stats = git_repo.get_author_stats(commits)
         summary.append("## Contributors")
-        for author, count in sorted(authors.items(), key=lambda x: x[1], reverse=True):
-            summary.append(f"- {author}: {count} commits")
+        summary.extend(git_repo.format_author_stats(author_stats))
 
         summary.append("\n## Recent Commits")
-        for commit in commits[:10]:
-            date_str = datetime.fromtimestamp(commit.committed_date).strftime("%Y-%m-%d %H:%M")
-            message = commit.message.strip().split("\n")[0][:100]
-            summary.append(f"- **{date_str}** [{commit.hexsha[:7]}]: {message}")
-
-        if len(commits) > 10:
-            summary.append(f"\n... and {len(commits) - 10} more commits")
+        summary.extend(git_repo.format_commits_summary(commits, max_display=10))
 
         return "\n".join(summary)
     except Exception as e:
@@ -457,14 +429,15 @@ def get_recent_changes_summary(days: int = 7) -> str:
 
 @mcp.tool()
 def index_changed_files() -> str:
-    if vector_store.get_collection() is None:
+    ctx = get_context()
+    if ctx.vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
     root_dir = PROJECT_ROOT
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
-    return indexer.index_changed(root_dir, ignored_dirs, ignore_patterns)
+    return ctx.indexer.index_changed(root_dir, ignored_dirs, ignore_patterns)
 
 
 def should_include_search_result(
@@ -539,7 +512,8 @@ def search_codebase_advanced(
         return "Error: min_relevance must be between 0 and 1."
 
     try:
-        results = vector_store.query(query_texts=[query], n_results=n_results * 2)
+        ctx = get_context()
+        results = ctx.vector_store.query(query_texts=[query], n_results=n_results * 2)
 
         if results is None:
             return "Vector store not initialized."
@@ -574,42 +548,26 @@ def auto_update_memory_from_commits(days: int = 7, auto_summarize: bool = True) 
         return "Error: days must be between 1 and 90"
 
     try:
-        repo = git.Repo(os.getcwd(), search_parent_directories=True)
-    except git.InvalidGitRepositoryError:
-        return "Not a git repository"
-    except Exception as e:
-        return f"Error accessing git: {e}"
+        git_repo = GitRepository()
+        commits = git_repo.get_commits(max_count=100, since_days=days)
+    except GitError as e:
+        return str(e)
+
+    if not commits:
+        return f"No commits found in the last {days} days"
 
     try:
-        cutoff_date = datetime.now() - timedelta(days=days)
-        commits = []
-
-        for commit in repo.iter_commits(max_count=100):
-            commit_date = datetime.fromtimestamp(commit.committed_date)
-            if commit_date < cutoff_date:
-                break
-            commits.append(commit)
-
-        if not commits:
-            return f"No commits found in the last {days} days"
-
         if auto_summarize and len(commits) > 5:
             summary_lines = [f"## Auto-Summary ({days} days)"]
             summary_lines.append(f"Total commits: {len(commits)}")
 
-            authors = {}
-            for commit in commits:
-                author = commit.author.name
-                authors[author] = authors.get(author, 0) + 1
-
+            author_stats = git_repo.get_author_stats(commits)
             summary_lines.append("\n**Contributors:**")
-            for author, count in sorted(authors.items(), key=lambda x: x[1], reverse=True):
-                summary_lines.append(f"- {author}: {count} commits")
+            summary_lines.extend(git_repo.format_author_stats(author_stats))
 
             summary_lines.append("\n**Key Changes:**")
             for commit in commits[:10]:
-                message = commit.message.strip().split("\n")[0][:100]
-                summary_lines.append(f"- {message}")
+                summary_lines.append(f"- {commit.first_line}")
 
             summary_text = "\n".join(summary_lines)
             update_memory(summary_text, section="Recent Activity")
@@ -795,17 +753,20 @@ def get_test_coverage_info() -> str:
 
 @mcp.tool()
 def save_memory_version(description: str = "") -> str:
-    return memory_manager.save_version(description)
+    ctx = get_context()
+    return ctx.memory_manager.save_version(description)
 
 
 @mcp.tool()
 def list_memory_versions() -> str:
-    return memory_manager.list_versions()
+    ctx = get_context()
+    return ctx.memory_manager.list_versions()
 
 
 @mcp.tool()
 def restore_memory_version(timestamp: str) -> str:
-    return memory_manager.restore_version(timestamp)
+    ctx = get_context()
+    return ctx.memory_manager.restore_version(timestamp)
 
 
 @mcp.tool()
@@ -816,8 +777,9 @@ def get_cache_stats() -> str:
     Returns:
         Formatted string with cache statistics
     """
+    ctx = get_context()
     file_stats = get_file_cache_stats()
-    query_stats = vector_store.get_query_cache_stats()
+    query_stats = ctx.vector_store.get_query_cache_stats()
 
     result = "# CACHE STATISTICS\n\n"
     result += "## File Cache (safe_read_text)\n"

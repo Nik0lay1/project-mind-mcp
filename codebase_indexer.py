@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Callable
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -13,12 +14,15 @@ from config import (
     get_max_memory_bytes,
     safe_read_text,
 )
+from exceptions import IndexError
 from incremental_indexing import IndexMetadata
 from logger import get_logger
 from memory_limited_indexer import MemoryLimitedIndexer
 from vector_store_manager import VectorStoreManager
 
 logger = get_logger()
+
+BatchUpsertCallback = Callable[[list[str], list[dict], list[str]], None]
 
 
 class CodebaseIndexer:
@@ -38,6 +42,27 @@ class CodebaseIndexer:
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
         )
+
+    def _create_batch_upsert_callback(self) -> BatchUpsertCallback:
+        """
+        Creates a callback function for batch upserting documents.
+
+        Returns:
+            Callback function for MemoryLimitedIndexer
+        """
+
+        def batch_upsert(
+            documents: list[str], metadatas: list[dict], ids: list[str]
+        ) -> None:
+            for i in range(0, len(documents), BATCH_SIZE):
+                end = min(i + BATCH_SIZE, len(documents))
+                self.vector_store.upsert(
+                    documents=documents[i:end],
+                    metadatas=metadatas[i:end],
+                    ids=ids[i:end],
+                )
+
+        return batch_upsert
 
     def should_index_file(self, file_path: Path, ignore_patterns: set[str]) -> bool:
         """
@@ -174,16 +199,8 @@ class CodebaseIndexer:
             if error:
                 return error
 
-        def batch_upsert(documents, metadatas, ids):
-            """Callback for flushing batches to vector store"""
-            for i in range(0, len(documents), BATCH_SIZE):
-                end = min(i + BATCH_SIZE, len(documents))
-                self.vector_store.upsert(
-                    documents=documents[i:end], metadatas=metadatas[i:end], ids=ids[i:end]
-                )
-
         max_memory = get_max_memory_bytes()
-        indexer = MemoryLimitedIndexer(max_memory, batch_upsert)
+        indexer = MemoryLimitedIndexer(max_memory, self._create_batch_upsert_callback())
 
         logger.info(f"Scanning files (memory limit: {max_memory / 1024 / 1024:.0f} MB)...")
 
@@ -221,16 +238,8 @@ class CodebaseIndexer:
         if not changed_files:
             return "No changed files to index."
 
-        def batch_upsert(documents, metadatas, ids):
-            """Callback for flushing batches to vector store"""
-            for i in range(0, len(documents), BATCH_SIZE):
-                end = min(i + BATCH_SIZE, len(documents))
-                self.vector_store.upsert(
-                    documents=documents[i:end], metadatas=metadatas[i:end], ids=ids[i:end]
-                )
-
         max_memory = get_max_memory_bytes()
-        indexer = MemoryLimitedIndexer(max_memory, batch_upsert)
+        indexer = MemoryLimitedIndexer(max_memory, self._create_batch_upsert_callback())
 
         logger.info(
             f"Found {len(changed_files)} changed files (memory limit: {max_memory / 1024 / 1024:.0f} MB)..."

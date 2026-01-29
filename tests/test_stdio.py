@@ -4,14 +4,21 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_mcp_server():
     """Test basic MCP server communication"""
 
+    # Determine python executable path based on platform
+    if sys.platform == "win32":
+        python_path = Path(".venv") / "Scripts" / "python.exe"
+    else:
+        python_path = Path(".venv") / "bin" / "python"
+
     # Start server
     process = subprocess.Popen(
-        [".venv/bin/python", "mcp_server.py"],
+        [str(python_path), "mcp_server.py"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

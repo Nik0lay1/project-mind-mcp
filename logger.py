@@ -1,17 +1,68 @@
 """Centralized logging configuration for ProjectMind"""
 
+import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
+from typing import Any
 
 from config import AI_DIR, LOG_BACKUP_COUNT, LOG_FILE, LOG_MAX_BYTES
 
 _logger: logging.Logger | None = None
 
 
+class StructuredFormatter(logging.Formatter):
+    """Formatter that includes extra fields as JSON."""
+
+    RESERVED_ATTRS = {
+        "name",
+        "msg",
+        "args",
+        "created",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "exc_info",
+        "exc_text",
+        "thread",
+        "threadName",
+        "taskName",
+        "message",
+        "asctime",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        base = super().format(record)
+
+        extra = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in self.RESERVED_ATTRS
+        }
+
+        if extra:
+            try:
+                extra_str = json.dumps(extra, default=str, ensure_ascii=False)
+                return f"{base} | {extra_str}"
+            except (TypeError, ValueError):
+                return base
+
+        return base
+
+
 def setup_logger(name: str = "ProjectMind") -> logging.Logger:
     """
     Sets up a rotating file logger with both file and stderr output.
+    Supports structured logging with extra fields.
 
     Args:
         name: Logger name
@@ -29,7 +80,7 @@ def setup_logger(name: str = "ProjectMind") -> logging.Logger:
 
     logger.handlers.clear()
 
-    formatter = logging.Formatter(
+    formatter = StructuredFormatter(
         fmt="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

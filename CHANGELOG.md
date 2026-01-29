@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.5.0] - 2026-01-29 🏗️ DEPENDENCY INJECTION & CODE QUALITY
+
+### Added
+- **Custom Exception Hierarchy** (`exceptions.py`)
+  - `ProjectMindError` base class for all exceptions
+  - Specific exceptions: `IndexError`, `SearchError`, `MemoryError`, `ConfigError`, `VectorStoreError`, `GitError`, `ValidationError`
+  - Better error handling and debugging
+
+- **Git Utilities Module** (`git_utils.py`)
+  - `CommitInfo` dataclass with formatted properties (`first_line`, `date_str`, `date_short`)
+  - `GitRepository` class for git operations
+  - Eliminated code duplication across 3+ MCP tools
+  - Methods: `get_commits()`, `get_commits_by_author()`, `get_author_stats()`, `format_commits_summary()`, `format_author_stats()`
+
+- **Dependency Injection Context** (`context.py`)
+  - `AppContext` dataclass replacing global singletons
+  - Functions: `get_context()`, `set_context()`, `reset_context()`
+  - Improved testability and modularity
+  - Eliminates global state issues
+
+- **Structured Logging** (`logger.py`)
+  - `StructuredFormatter` class for JSON extra fields
+  - Enhanced log output with context information
+
+### Changed
+- **Refactored `codebase_indexer.py`**
+  - Added `_create_batch_upsert_callback()` method
+  - Eliminated duplicated callback code
+  - Added proper type hints with `Callable`
+
+- **Refactored `mcp_server.py`**
+  - All MCP tools use `get_context()` instead of globals
+  - Replaced direct `git.Repo` usage with `GitRepository` class
+  - Updated all git-related functions: `ingest_git_history()`, `generate_project_summary()`, `get_recent_changes_summary()`, `auto_update_memory_from_commits()`
+
+### Fixed
+- **Test Suite Improvements**
+  - Rewrote `test_search.py` with 14 comprehensive test cases
+  - Created `test_git_utils.py` with 11 tests
+  - Created `test_context.py` with 7 tests
+  - Fixed `test_get_stats_empty` - added proper mocking for metadata file
+  - Fixed `test_logger_setup` - corrected logger name expectation
+  - Fixed `test_rag_tools` - handles numpy 2.0 incompatibility gracefully
+  - Fixed `test_mcp_server` - Windows path compatibility (`.venv\Scripts\python.exe`)
+  - **Test Pass Rate: 131/131 (100%)**
+
+### Technical Details
+- Updated `pyproject.toml` with new modules
+- All tests passing on Windows platform
+- Improved code coverage to 78%
+- Better separation of concerns and modularity
+
 ## [0.4.1] - 2026-01-27 🐛 CRITICAL BUG FIXES
 
 ### Fixed

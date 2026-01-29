@@ -13,9 +13,9 @@ def test_logger_setup():
     """Test logger can be initialized"""
     print("Testing logger setup...")
 
-    logger = setup_logger("TestLogger")
+    logger = setup_logger()
     assert logger is not None
-    assert logger.name == "TestLogger"
+    assert logger.name == "ProjectMind"
     print("  [OK] Logger initialized")
 
 

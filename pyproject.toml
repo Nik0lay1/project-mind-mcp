@@ -43,6 +43,9 @@ py-modules = [
     "codebase_indexer",
     "incremental_indexing",
     "memory_limited_indexer",
+    "exceptions",
+    "git_utils",
+    "context",
 ]
 
 [tool.black]
