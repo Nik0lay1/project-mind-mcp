@@ -1,6 +1,8 @@
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
+from time import time
 
 from mcp.server.fastmcp import FastMCP
 
@@ -269,8 +271,17 @@ def generate_project_summary() -> str:
             pass
 
         root = PROJECT_ROOT
-        py_files = len(list(root.rglob("*.py")))
-        js_files = len(list(root.rglob("*.js"))) + len(list(root.rglob("*.ts")))
+        ignored_dirs = get_ignored_dirs()
+        py_files = 0
+        js_files = 0
+        
+        for root_path, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+            for file in files:
+                if file.endswith('.py'):
+                    py_files += 1
+                elif file.endswith(('.js', '.ts')):
+                    js_files += 1
 
         summary_parts.append("\n## Codebase Stats")
         summary_parts.append(f"- Python files: {py_files}")
@@ -341,8 +352,18 @@ def extract_tech_stack() -> str:
         return f"Error extracting tech stack: {e}"
 
 
+_structure_cache = None
+_structure_cache_time = 0
+STRUCTURE_CACHE_TTL = 300
+
 @mcp.tool()
 def analyze_project_structure() -> str:
+    global _structure_cache, _structure_cache_time
+    
+    current_time = time()
+    if _structure_cache and (current_time - _structure_cache_time) < STRUCTURE_CACHE_TTL:
+        return _structure_cache
+    
     try:
         root = PROJECT_ROOT
         ignored_dirs = get_ignored_dirs()
@@ -353,7 +374,11 @@ def analyze_project_structure() -> str:
         dirs_by_depth = {}
         for item in root.iterdir():
             if item.is_dir() and item.name not in ignored_dirs:
-                dirs_by_depth[item.name] = len(list(item.rglob("*")))
+                try:
+                    count = sum(1 for _ in item.rglob("*") if _.is_file())
+                    dirs_by_depth[item.name] = count
+                except (PermissionError, OSError):
+                    continue
 
         sorted_dirs = sorted(dirs_by_depth.items(), key=lambda x: x[1], reverse=True)[:10]
 
@@ -362,10 +387,13 @@ def analyze_project_structure() -> str:
             structure.append(f"- `{dir_name}/` ({count} items)")
 
         file_types = {}
-        for ext in [".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".c", ".cpp"]:
-            count = len(list(root.rglob(f"*{ext}")))
-            if count > 0:
-                file_types[ext] = count
+        for root_path, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in ignored_dirs]
+            
+            for file in files:
+                ext = Path(file).suffix
+                if ext in [".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".c", ".cpp"]:
+                    file_types[ext] = file_types.get(ext, 0) + 1
 
         if file_types:
             structure.append("\n## File Types")
@@ -391,7 +419,10 @@ def analyze_project_structure() -> str:
             for cfg in config_files:
                 structure.append(f"- {cfg}")
 
-        return "\n".join(structure)
+        result = "\n".join(structure)
+        _structure_cache = result
+        _structure_cache_time = current_time
+        return result
     except Exception as e:
         return f"Error analyzing structure: {e}"
 
