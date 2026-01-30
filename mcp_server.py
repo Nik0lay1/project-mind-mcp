@@ -1,6 +1,5 @@
 import os
 import sys
-from functools import lru_cache
 from pathlib import Path
 from time import time
 
@@ -274,8 +273,8 @@ def generate_project_summary() -> str:
         ignored_dirs = get_ignored_dirs()
         py_files = 0
         js_files = 0
-        
-        for root_path, dirs, files in os.walk(root):
+
+        for _root_path, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if d not in ignored_dirs]
             for file in files:
                 if file.endswith('.py'):
@@ -359,11 +358,11 @@ STRUCTURE_CACHE_TTL = 300
 @mcp.tool()
 def analyze_project_structure() -> str:
     global _structure_cache, _structure_cache_time
-    
+
     current_time = time()
     if _structure_cache and (current_time - _structure_cache_time) < STRUCTURE_CACHE_TTL:
         return _structure_cache
-    
+
     try:
         root = PROJECT_ROOT
         ignored_dirs = get_ignored_dirs()
@@ -387,9 +386,9 @@ def analyze_project_structure() -> str:
             structure.append(f"- `{dir_name}/` ({count} items)")
 
         file_types = {}
-        for root_path, dirs, files in os.walk(root):
+        for _root_path, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if d not in ignored_dirs]
-            
+
             for file in files:
                 ext = Path(file).suffix
                 if ext in [".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".c", ".cpp"]:
