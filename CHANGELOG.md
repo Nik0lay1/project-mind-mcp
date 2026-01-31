@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.4] - 2026-01-31 🧠 INTELLIGENT PROJECT AUTO-DETECTION
+
+### Added
+- **Automatic Project Detection** - No manual configuration needed!
+  - Automatically finds project root using multiple strategies
+  - Searches for project markers (.git, package.json, pyproject.toml, etc.)
+  - Checks environment variables (WORKSPACE_FOLDER, PROJECT_ROOT, PROJECT_PATH)
+  - Supports --project-root command-line argument
+  - Works seamlessly across different IDEs and editors
+  
+### Changed
+- **Enhanced Startup Logging**
+  - Shows detected project root, cwd, and server location
+  - Helps diagnose project detection issues
+  - Clear separation in logs for better readability
+
+### Technical Details
+- Added `find_project_root()` function with 4-tier detection strategy
+- Searches up to 10 directory levels for project markers
+- Supports 10+ project types (Node.js, Python, Rust, Go, Java, etc.)
+- Falls back to current working directory if no markers found
+- All 131 tests passing
+
 ## [0.5.3] - 2026-01-31 🎯 PROJECT ROOT & MEMORY PAGINATION FIX
 
 ### Fixed

@@ -28,8 +28,12 @@ def log(message: str) -> None:
 
 
 def startup_check() -> None:
-    log(f"Running startup check in project root: {PROJECT_ROOT}")
-    log(f"Current working directory: {os.getcwd()}")
+    log("=" * 60)
+    log("ProjectMind MCP Server Starting...")
+    log(f"Project Root (detected): {PROJECT_ROOT}")
+    log(f"Current Working Directory: {Path.cwd()}")
+    log(f"MCP Server Location: {Path(__file__).parent}")
+    log("=" * 60)
 
     try:
         if not AI_DIR.exists():

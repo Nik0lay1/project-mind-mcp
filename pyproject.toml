@@ -1,6 +1,6 @@
 [project]
 name = "projectmind"
-version = "0.5.3"
+version = "0.5.4"
 description = "Local Context & Memory MCP Server with RAG capabilities"
 authors = [
     {name = "Mykola Riabokon"}

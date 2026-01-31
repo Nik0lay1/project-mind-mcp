@@ -39,6 +39,7 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
   - Version history tracking
 - **🆕 Performance Caching & Optimization** (v0.4.0+):
   - Multi-layer caching system (LRU, TTL, File caches)
+  - **🔥 NEW (v0.5.4)**: Intelligent project auto-detection (no manual config!)
   - **🔥 NEW (v0.5.3)**: Memory pagination to prevent context window exhaustion
   - **🔥 NEW (v0.5.3)**: Fixed project detection (cwd-based, works with any project)
   - **🔥 NEW (v0.5.2)**: Lazy vector store initialization (30-60s faster startup)
@@ -112,40 +113,30 @@ python mcp_server.py
 
 Add ProjectMind as a custom MCP server in Zencoder's Tools settings.
 
-**IMPORTANT**: The server uses the **current working directory (cwd)** to detect your project. Your IDE/client must set cwd to your project directory when launching the server.
+**✨ NEW (v0.5.4)**: The server now **automatically detects** your project! No need to set `cwd` manually.
 
-#### Option 1: Global Installation (Recommended)
+#### Global Installation (Recommended)
 
-Install ProjectMind once and use it with any project:
+Install ProjectMind once and use it with **any project**:
 
 ```json
 {
   "type": "stdio",
   "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
-  "args": ["f:/path/to/projectmind/mcp_server.py"],
-  "cwd": "${workspaceFolder}"
+  "args": ["f:/path/to/projectmind/mcp_server.py"]
 }
 ```
 
-#### Option 2: Per-Project Installation
+The server will automatically find your project by searching for markers like `.git`, `package.json`, `pyproject.toml`, etc.
 
-Copy `mcp_server.py` and dependencies into each project:
-
-```json
-{
-  "type": "stdio",
-  "command": "${workspaceFolder}/.venv/Scripts/python.exe",
-  "args": ["${workspaceFolder}/mcp_server.py"]
-}
-```
+#### Configuration Examples
 
 **Windows Example:**
 ```json
 {
   "type": "stdio",
   "command": "f:/Tools/ProjectMind/.venv/Scripts/python.exe",
-  "args": ["f:/Tools/ProjectMind/mcp_server.py"],
-  "cwd": "${workspaceFolder}"
+  "args": ["f:/Tools/ProjectMind/mcp_server.py"]
 }
 ```
 
@@ -154,8 +145,35 @@ Copy `mcp_server.py` and dependencies into each project:
 {
   "type": "stdio",
   "command": "/opt/projectmind/.venv/bin/python",
-  "args": ["/opt/projectmind/mcp_server.py"],
-  "cwd": "${workspaceFolder}"
+  "args": ["/opt/projectmind/mcp_server.py"]
+}
+```
+
+#### Manual Project Path (Optional)
+
+If auto-detection doesn't work, you can specify the project path:
+
+```json
+{
+  "type": "stdio",
+  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
+  "args": [
+    "f:/path/to/projectmind/mcp_server.py",
+    "--project-root",
+    "${workspaceFolder}"
+  ]
+}
+```
+
+Or set environment variable:
+```json
+{
+  "type": "stdio",
+  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
+  "args": ["f:/path/to/projectmind/mcp_server.py"],
+  "env": {
+    "PROJECT_ROOT": "${workspaceFolder}"
+  }
 }
 ```
 
@@ -163,11 +181,7 @@ Copy `mcp_server.py` and dependencies into each project:
 
 To use ProjectMind with other IDEs, add it to your MCP config.
 
-**Important**: Always specify `cwd` to point to your project directory.
-
-**Command:** `python` (or full path to Python)  
-**Args:** `/path/to/projectmind/mcp_server.py`  
-**Working Directory:** Your project directory
+**✨ NEW (v0.5.4)**: Project detection is now automatic! Just point to the server.
 
 **Example config.json:**
 ```json
@@ -175,16 +189,23 @@ To use ProjectMind with other IDEs, add it to your MCP config.
   "mcpServers": {
     "projectmind": {
       "command": "/opt/projectmind/.venv/bin/python",
-      "args": ["/opt/projectmind/mcp_server.py"],
-      "cwd": "/path/to/your/project"
+      "args": ["/opt/projectmind/mcp_server.py"]
     }
   }
 }
 ```
 
-Or if using python directly:  
-**Command:** `/path/to/python`  
-**Args:** `/absolute/path/to/mcp_server.py`
+The server will automatically detect your project. If needed, you can manually specify:
+```json
+{
+  "mcpServers": {
+    "projectmind": {
+      "command": "/opt/projectmind/.venv/bin/python",
+      "args": ["/opt/projectmind/mcp_server.py", "--project-root", "/path/to/project"]
+    }
+  }
+}
+```
 
 ## Available Tools
 

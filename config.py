@@ -1,10 +1,67 @@
 import os
+import sys
 from pathlib import Path
 
-# Use current working directory as project root
-# This allows the server to work with any project directory
-# The IDE/client sets cwd to the project directory when launching the server
-PROJECT_ROOT = Path.cwd()
+
+def find_project_root() -> Path:
+    """
+    Intelligently finds the project root directory.
+    
+    Detection strategy:
+    1. Check command-line argument --project-root
+    2. Check environment variables (WORKSPACE_FOLDER, PROJECT_ROOT)
+    3. Search upward for project markers (.git, .ai/, package.json, pyproject.toml, etc.)
+    4. Fall back to current working directory
+    
+    Returns:
+        Path to project root directory
+    """
+    # Strategy 1: Check command-line arguments
+    for i, arg in enumerate(sys.argv):
+        if arg == "--project-root" and i + 1 < len(sys.argv):
+            project_path = Path(sys.argv[i + 1]).resolve()
+            if project_path.exists():
+                return project_path
+    
+    # Strategy 2: Check environment variables
+    for env_var in ["WORKSPACE_FOLDER", "PROJECT_ROOT", "PROJECT_PATH"]:
+        if env_path := os.getenv(env_var):
+            project_path = Path(env_path).resolve()
+            if project_path.exists():
+                return project_path
+    
+    # Strategy 3: Search upward for project markers
+    current = Path.cwd().resolve()
+    project_markers = [
+        ".git",           # Git repository
+        ".ai",            # ProjectMind directory
+        "package.json",   # Node.js project
+        "pyproject.toml", # Python project
+        "Cargo.toml",     # Rust project
+        "go.mod",         # Go project
+        "pom.xml",        # Maven project
+        "build.gradle",   # Gradle project
+        ".project",       # Eclipse project
+        ".vscode",        # VS Code workspace
+    ]
+    
+    # Search up to 10 levels up
+    for _ in range(10):
+        for marker in project_markers:
+            if (current / marker).exists():
+                return current
+        
+        parent = current.parent
+        if parent == current:  # Reached root
+            break
+        current = parent
+    
+    # Strategy 4: Fall back to cwd
+    return Path.cwd().resolve()
+
+
+# Auto-detect project root
+PROJECT_ROOT = find_project_root()
 
 _file_cache = None
 
