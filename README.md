@@ -39,6 +39,8 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
   - Version history tracking
 - **🆕 Performance Caching & Optimization** (v0.4.0+):
   - Multi-layer caching system (LRU, TTL, File caches)
+  - **🔥 NEW (v0.5.3)**: Memory pagination to prevent context window exhaustion
+  - **🔥 NEW (v0.5.3)**: Fixed project detection (cwd-based, works with any project)
   - **🔥 NEW (v0.5.2)**: Lazy vector store initialization (30-60s faster startup)
   - **🔥 NEW (v0.5.2)**: Fixed freezing on parallel memory reads
   - **🔥 NEW (v0.5.1)**: Structure analysis caching (5-minute TTL)
@@ -108,15 +110,32 @@ python mcp_server.py
 
 ### Zencoder.ai
 
-Add ProjectMind as a custom MCP server in Zencoder's Tools settings:
+Add ProjectMind as a custom MCP server in Zencoder's Tools settings.
+
+**IMPORTANT**: The server uses the **current working directory (cwd)** to detect your project. Your IDE/client must set cwd to your project directory when launching the server.
+
+#### Option 1: Global Installation (Recommended)
+
+Install ProjectMind once and use it with any project:
 
 ```json
 {
   "type": "stdio",
-  "command": "/absolute/path/to/your/project/.venv/Scripts/python.exe",
-  "args": [
-    "/absolute/path/to/your/project/mcp_server.py"
-  ]
+  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
+  "args": ["f:/path/to/projectmind/mcp_server.py"],
+  "cwd": "${workspaceFolder}"
+}
+```
+
+#### Option 2: Per-Project Installation
+
+Copy `mcp_server.py` and dependencies into each project:
+
+```json
+{
+  "type": "stdio",
+  "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "args": ["${workspaceFolder}/mcp_server.py"]
 }
 ```
 
@@ -124,10 +143,9 @@ Add ProjectMind as a custom MCP server in Zencoder's Tools settings:
 ```json
 {
   "type": "stdio",
-  "command": "f:/Projects/YourProject/.venv/Scripts/python.exe",
-  "args": [
-    "f:/Projects/YourProject/mcp_server.py"
-  ]
+  "command": "f:/Tools/ProjectMind/.venv/Scripts/python.exe",
+  "args": ["f:/Tools/ProjectMind/mcp_server.py"],
+  "cwd": "${workspaceFolder}"
 }
 ```
 
@@ -135,10 +153,9 @@ Add ProjectMind as a custom MCP server in Zencoder's Tools settings:
 ```json
 {
   "type": "stdio",
-  "command": "/home/user/projects/yourproject/.venv/bin/python",
-  "args": [
-    "/home/user/projects/yourproject/mcp_server.py"
-  ]
+  "command": "/opt/projectmind/.venv/bin/python",
+  "args": ["/opt/projectmind/mcp_server.py"],
+  "cwd": "${workspaceFolder}"
 }
 ```
 
@@ -146,8 +163,24 @@ Add ProjectMind as a custom MCP server in Zencoder's Tools settings:
 
 To use ProjectMind with other IDEs, add it to your MCP config.
 
-**Command:** `uv`  
-**Args:** `run`, `/absolute/path/to/mcp_server.py`
+**Important**: Always specify `cwd` to point to your project directory.
+
+**Command:** `python` (or full path to Python)  
+**Args:** `/path/to/projectmind/mcp_server.py`  
+**Working Directory:** Your project directory
+
+**Example config.json:**
+```json
+{
+  "mcpServers": {
+    "projectmind": {
+      "command": "/opt/projectmind/.venv/bin/python",
+      "args": ["/opt/projectmind/mcp_server.py"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
 
 Or if using python directly:  
 **Command:** `/path/to/python`  
@@ -157,8 +190,26 @@ Or if using python directly:
 
 ### Memory Management
 
-#### `read_memory()`
+#### `read_memory(max_lines: int | None = 100)`
 Returns the current state of the project memory.
+
+**Parameters:**
+- `max_lines`: Maximum number of lines to return (default: 100)
+  - Use lower values (50-200) for quick summaries
+  - Use `None` for full content
+  - Prevents overwhelming context windows with large memory files
+
+**Example:**
+```python
+# Quick summary (first 100 lines)
+read_memory()
+
+# First 50 lines
+read_memory(max_lines=50)
+
+# Full content (may be large!)
+read_memory(max_lines=None)
+```
 
 #### `update_memory(content: str, section: str = "Recent Decisions")`
 Appends information to the project memory file under specified section.
@@ -184,6 +235,8 @@ Searches the codebase using vector similarity.
 
 #### `get_index_stats()`
 Returns statistics about the current vector store (number of chunks).
+
+**Performance Note:** This operation is very fast and doesn't trigger vector store initialization.
 
 #### `index_changed_files()` 🆕
 **Incremental indexing** - only indexes files that changed since last index.

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.3] - 2026-01-31 🎯 PROJECT ROOT & MEMORY PAGINATION FIX
+
+### Fixed
+- **Critical: PROJECT_ROOT now uses current working directory (cwd)**
+  - Fixed server working on itself instead of target project
+  - MCP server now correctly detects the project directory where it's invoked
+  - Allows single server installation to work with multiple projects
+  
+### Added
+- **Memory Pagination to Reduce Context Usage**
+  - `read_memory()` now accepts `max_lines` parameter (default: 100)
+  - Prevents overwhelming context windows with large memory files
+  - Shows truncation message with remaining line count
+  - Use `read_memory(max_lines=None)` for full content
+
+### Changed
+- **PROJECT_ROOT Detection**
+  - Changed from `Path(__file__).parent` to `Path.cwd()`
+  - Server now works with any project when cwd is set correctly
+  - IDE/client must set working directory to target project
+
+### Technical Details
+- Updated `config.py` PROJECT_ROOT to use `Path.cwd()`
+- Added `max_lines` parameter to `MemoryManager.read()`
+- Added validation for `max_lines` in `read_memory()` tool
+- All 131 tests pass successfully
+
 ## [0.5.2] - 2026-01-31 🚀 LAZY INITIALIZATION FIX
 
 ### Fixed

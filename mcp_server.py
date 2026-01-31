@@ -116,9 +116,22 @@ def get_project_memory() -> str:
 
 
 @mcp.tool()
-def read_memory() -> str:
+def read_memory(max_lines: int | None = 100) -> str:
+    """
+    Read project memory.
+    
+    Args:
+        max_lines: Maximum number of lines to return (default: 100). 
+                   Set to None for full content. Use smaller values for quick summaries.
+    
+    Returns:
+        Memory content (possibly truncated)
+    """
+    if max_lines is not None and max_lines <= 0:
+        return "Error: max_lines must be positive or None"
+    
     ctx = get_context()
-    return ctx.memory_manager.read()
+    return ctx.memory_manager.read(max_lines=max_lines)
 
 
 @mcp.tool()

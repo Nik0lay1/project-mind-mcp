@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
 
-# Use script location as project root, not current working directory
-# This ensures the server works correctly when launched from any directory
-PROJECT_ROOT = Path(__file__).parent.resolve()
+# Use current working directory as project root
+# This allows the server to work with any project directory
+# The IDE/client sets cwd to the project directory when launching the server
+PROJECT_ROOT = Path.cwd()
 
 _file_cache = None
 

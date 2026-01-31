@@ -25,9 +25,13 @@ class MemoryManager:
         self.memory_file = memory_file
         self.history_dir = MEMORY_HISTORY_DIR
 
-    def read(self) -> str:
+    def read(self, max_lines: int | None = 100) -> str:
         """
         Reads current memory content.
+
+        Args:
+            max_lines: Maximum number of lines to return. None for full content.
+                      Default is 100 to avoid overwhelming context windows.
 
         Returns:
             Memory content or error message
@@ -36,7 +40,18 @@ class MemoryManager:
             return "Memory file not found."
 
         try:
-            return self.memory_file.read_text()
+            content = self.memory_file.read_text()
+            
+            if max_lines is None:
+                return content
+            
+            lines = content.split('\n')
+            if len(lines) <= max_lines:
+                return content
+            
+            truncated = '\n'.join(lines[:max_lines])
+            remaining = len(lines) - max_lines
+            return f"{truncated}\n\n... ({remaining} more lines truncated. Use read_memory(max_lines=None) for full content)"
         except Exception as e:
             logger.error(f"Error reading memory: {e}")
             return f"Error reading memory: {e}"
