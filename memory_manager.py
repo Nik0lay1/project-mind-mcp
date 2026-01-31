@@ -41,14 +41,14 @@ class MemoryManager:
 
         try:
             content = self.memory_file.read_text()
-            
+
             if max_lines is None:
                 return content
-            
+
             lines = content.split('\n')
             if len(lines) <= max_lines:
                 return content
-            
+
             truncated = '\n'.join(lines[:max_lines])
             remaining = len(lines) - max_lines
             return f"{truncated}\n\n... ({remaining} more lines truncated. Use read_memory(max_lines=None) for full content)"
