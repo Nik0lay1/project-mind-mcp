@@ -1,6 +1,10 @@
+import json
 import os
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from time import time
 
@@ -869,6 +873,173 @@ def get_cache_stats() -> str:
     result += f"- **TTL**: {query_stats['ttl_seconds']}s\n"
 
     return result
+
+
+@mcp.tool()
+def platform_get_client_errors(
+    base_url: str,
+    limit: int = 100,
+    offset: int = 0,
+    error_type: str = "all",
+    since: str | None = None,
+    user_id: str | None = None,
+) -> str:
+    """
+    Get client-side errors from the Agency Platform.
+
+    Args:
+        base_url: Platform URL (e.g., https://copri.ai)
+        limit: Maximum number of errors to return (default: 100, max: 500)
+        offset: Pagination offset
+        error_type: Filter by type: 'error', 'unhandledrejection', 'console.error', 'all'
+        since: ISO timestamp to fetch errors since (optional)
+        user_id: Filter by specific user ID (optional)
+
+    Returns:
+        JSON response with errors, pagination and stats
+    """
+    admin_token = os.environ.get("PLATFORM_ADMIN_TOKEN")
+    admin_username = os.environ.get("AUTH_USERNAME", "ua-man")
+
+    if not admin_token:
+        return "Error: PLATFORM_ADMIN_TOKEN environment variable not set"
+
+    if limit < 1 or limit > 500:
+        return "Error: limit must be between 1 and 500"
+
+    if error_type not in ("error", "unhandledrejection", "console.error", "all"):
+        return "Error: error_type must be 'error', 'unhandledrejection', 'console.error', or 'all'"
+
+    try:
+        params: dict[str, str | int] = {
+            "limit": limit,
+            "offset": offset,
+            "type": error_type,
+        }
+        if since:
+            params["since"] = since
+        if user_id:
+            params["userId"] = user_id
+
+        query_string = urllib.parse.urlencode(params)
+        url = f"{base_url.rstrip('/')}/api/admin/client-errors?{query_string}"
+
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "x-username": admin_username,
+                "Content-Type": "application/json",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        result_parts = []
+        result_parts.append("# CLIENT ERRORS REPORT\n")
+
+        if "stats" in data and "last24h" in data["stats"]:
+            stats = data["stats"]["last24h"]
+            result_parts.append("## Statistics (Last 24h)")
+            result_parts.append(f"- **Total errors**: {stats.get('total', 0)}")
+            result_parts.append(f"- **Errors**: {stats.get('errors', 0)}")
+            result_parts.append(f"- **Unhandled rejections**: {stats.get('rejections', 0)}")
+            result_parts.append(f"- **Console errors**: {stats.get('consoleErrors', 0)}")
+            result_parts.append(f"- **Affected users**: {stats.get('affectedUsers', 0)}")
+            result_parts.append(f"- **Sessions**: {stats.get('sessions', 0)}")
+            result_parts.append("")
+
+        if "pagination" in data:
+            pag = data["pagination"]
+            result_parts.append(
+                f"## Pagination: {pag.get('returned', 0)} returned "
+                f"(offset: {pag.get('offset', 0)}, limit: {pag.get('limit', 100)})\n"
+            )
+
+        errors = data.get("errors", [])
+        if errors:
+            result_parts.append("## Errors\n")
+            for i, err in enumerate(errors, 1):
+                result_parts.append(f"### {i}. {err.get('errorType', 'unknown')} - {err.get('username', 'unknown')}")
+                result_parts.append(f"- **Message**: {err.get('message', 'N/A')}")
+                result_parts.append(f"- **URL**: {err.get('url', 'N/A')}")
+                if err.get("line"):
+                    result_parts.append(f"- **Location**: line {err.get('line')}, col {err.get('column')}")
+                result_parts.append(f"- **Time**: {err.get('clientTimestamp', err.get('createdAt', 'N/A'))}")
+                if err.get("stack"):
+                    stack_preview = err["stack"][:500] + "..." if len(err["stack"]) > 500 else err["stack"]
+                    result_parts.append(f"- **Stack**:\n```\n{stack_preview}\n```")
+                result_parts.append("")
+        else:
+            result_parts.append("No errors found.")
+
+        return "\n".join(result_parts)
+
+    except urllib.error.HTTPError as e:
+        return f"HTTP Error {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"URL Error: {e.reason}"
+    except json.JSONDecodeError as e:
+        return f"JSON Parse Error: {e}"
+    except Exception as e:
+        log(f"Error fetching client errors: {e}")
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def platform_delete_old_client_errors(
+    base_url: str,
+    older_than_days: int = 30,
+) -> str:
+    """
+    Delete old client-side errors from the Agency Platform.
+
+    Args:
+        base_url: Platform URL (e.g., https://copri.ai)
+        older_than_days: Delete errors older than this many days (default: 30)
+
+    Returns:
+        Result message
+    """
+    admin_token = os.environ.get("PLATFORM_ADMIN_TOKEN")
+    admin_username = os.environ.get("AUTH_USERNAME", "ua-man")
+
+    if not admin_token:
+        return "Error: PLATFORM_ADMIN_TOKEN environment variable not set"
+
+    if older_than_days < 1:
+        return "Error: older_than_days must be at least 1"
+
+    try:
+        url = f"{base_url.rstrip('/')}/api/admin/client-errors?olderThanDays={older_than_days}"
+
+        req = urllib.request.Request(
+            url,
+            method="DELETE",
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "x-username": admin_username,
+                "Content-Type": "application/json",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        if data.get("success"):
+            deleted = data.get("deleted", 0)
+            return f"Successfully deleted {deleted} errors older than {older_than_days} days"
+        else:
+            return f"Failed to delete errors: {data.get('error', 'Unknown error')}"
+
+    except urllib.error.HTTPError as e:
+        return f"HTTP Error {e.code}: {e.reason}"
+    except urllib.error.URLError as e:
+        return f"URL Error: {e.reason}"
+    except Exception as e:
+        log(f"Error deleting client errors: {e}")
+        return f"Error: {e}"
 
 
 if __name__ == "__main__":
