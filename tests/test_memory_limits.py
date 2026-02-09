@@ -12,7 +12,9 @@ def test_basic_indexing() -> None:
 
     batches: list[tuple[list[str], list[dict[str, str]], list[str]]] = []
 
-    def collect_batch(documents: list[str], metadatas: list[dict[str, str]], ids: list[str]) -> None:
+    def collect_batch(
+        documents: list[str], metadatas: list[dict[str, str]], ids: list[str]
+    ) -> None:
         batches.append((documents.copy(), metadatas.copy(), ids.copy()))
 
     indexer = MemoryLimitedIndexer(1024 * 1024, collect_batch)
@@ -34,7 +36,9 @@ def test_memory_limit_flush() -> None:
 
     batches: list[tuple[list[str], list[dict[str, str]], list[str]]] = []
 
-    def collect_batch(documents: list[str], metadatas: list[dict[str, str]], ids: list[str]) -> None:
+    def collect_batch(
+        documents: list[str], metadatas: list[dict[str, str]], ids: list[str]
+    ) -> None:
         batches.append((documents.copy(), metadatas.copy(), ids.copy()))
 
     small_limit = 500
@@ -71,7 +75,9 @@ def test_manual_flush() -> None:
 
     batches: list[int] = []
 
-    def collect_batch(documents: list[str], metadatas: list[dict[str, str]], ids: list[str]) -> None:
+    def collect_batch(
+        documents: list[str], metadatas: list[dict[str, str]], ids: list[str]
+    ) -> None:
         batches.append(len(documents))
 
     indexer = MemoryLimitedIndexer(10 * 1024 * 1024, collect_batch)
@@ -152,7 +158,9 @@ def test_metadata_preservation() -> None:
 
     collected: list[tuple[list[str], list[dict[str, str | int]], list[str]]] = []
 
-    def collect(documents: list[str], metadatas: list[dict[str, str | int]], ids: list[str]) -> None:
+    def collect(
+        documents: list[str], metadatas: list[dict[str, str | int]], ids: list[str]
+    ) -> None:
         collected.append((documents.copy(), metadatas.copy(), ids.copy()))
 
     indexer = MemoryLimitedIndexer(10 * 1024 * 1024, collect)

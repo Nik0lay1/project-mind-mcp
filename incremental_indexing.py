@@ -149,9 +149,7 @@ class IndexMetadata:
             return {"total_files": 0, "last_index": None}
 
         indexed_times: list[str] = [
-            str(info.get("indexed_at"))
-            for info in self.metadata.values()
-            if "indexed_at" in info
+            str(info.get("indexed_at")) for info in self.metadata.values() if "indexed_at" in info
         ]
         latest: str | None = max(indexed_times) if indexed_times else None
 

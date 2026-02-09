@@ -57,7 +57,9 @@ def mock_indexer() -> MagicMock:
 
 
 @pytest.fixture
-def mock_context(mock_vector_store: MagicMock, mock_memory_manager: MagicMock, mock_indexer: MagicMock) -> AppContext:
+def mock_context(
+    mock_vector_store: MagicMock, mock_memory_manager: MagicMock, mock_indexer: MagicMock
+) -> AppContext:
     """Create and set mock application context."""
     ctx = AppContext(
         vector_store=mock_vector_store,
@@ -103,7 +105,9 @@ class TestSearchCodebase:
         assert "Error" in result
         assert "50" in result
 
-    def test_search_valid_query(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_search_valid_query(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test successful search with valid query."""
         from mcp_server import search_codebase
 
@@ -111,7 +115,9 @@ class TestSearchCodebase:
         assert "test.py" in result
         mock_vector_store.query.assert_called_once()
 
-    def test_search_no_matches(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_search_no_matches(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test search with no matches."""
         from mcp_server import search_codebase
 
@@ -119,7 +125,9 @@ class TestSearchCodebase:
         result = search_codebase("nonexistent")
         assert "No matches found" in result
 
-    def test_search_vector_store_not_initialized(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_search_vector_store_not_initialized(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test search when vector store returns None."""
         from mcp_server import search_codebase
 
@@ -146,14 +154,18 @@ class TestSearchCodebaseAdvanced:
         assert "Error" in result
         assert "0 and 1" in result
 
-    def test_advanced_search_file_type_filter(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_advanced_search_file_type_filter(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test search with file type filter."""
         from mcp_server import search_codebase_advanced
 
         result = search_codebase_advanced("test", file_types=[".py"])
         assert "test.py" in result or "world.py" in result
 
-    def test_advanced_search_exclude_dirs(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_advanced_search_exclude_dirs(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test search with directory exclusion."""
         from mcp_server import search_codebase_advanced
 
@@ -170,7 +182,9 @@ class TestSearchCodebaseAdvanced:
 class TestGetIndexStats:
     """Tests for get_index_stats function."""
 
-    def test_get_stats_success(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_get_stats_success(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test successful stats retrieval."""
         from mcp_server import get_index_stats
 
@@ -178,7 +192,9 @@ class TestGetIndexStats:
         assert "100" in result
         assert "chunks" in result.lower()
 
-    def test_get_stats_not_initialized(self, mock_context: AppContext, mock_vector_store: MagicMock) -> None:
+    def test_get_stats_not_initialized(
+        self, mock_context: AppContext, mock_vector_store: MagicMock
+    ) -> None:
         """Test stats when vector store not initialized."""
         from mcp_server import get_index_stats
 
