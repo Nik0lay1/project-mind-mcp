@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.6] - 2026-02-09 🛠️ STABILITY & PERFORMANCE FIXES
+
+### Fixed
+- **Critical: Fixed server hang on large/external projects**
+  - Added safety limit to `scan_indexable_files` (stops after 20,000 files)
+  - Prevents infinite hangs on massive mono-repositories or recursive directory structures
+  - Server now stays responsive even when opened in root directories
+
+- **Enhanced Default Ignore List**
+  - Added `target`, `vendor`, `bin`, `obj`, `out`, `logs`, `tmp`, `temp`, `.cache`, `.gradle` to default ignore list
+  - Prevents indexing of massive build artifacts and dependency folders (Rust, Go, Java, C#, etc.)
+  - Significantly improves indexing speed and reduces memory usage
+
+### Added
+- **Regression Test for Indexing Limits**
+  - Added `tests/test_indexing_limit.py` to verify file scanning limits
+  - Ensures the 20,000 file limit is respected
+
+### Technical Details
+- Expanded `DEFAULT_IGNORED_DIRS` in `config.py`
+- Added `max_files` parameter to `CodebaseIndexer.scan_indexable_files`
+- Verified fixes with new unit tests and `black` formatting
+
 ## [0.5.5] - 2026-02-05 🔧 CRITICAL BUGFIXES & IMPROVEMENTS
 
 ### Fixed

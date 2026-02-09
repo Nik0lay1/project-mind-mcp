@@ -94,7 +94,11 @@ class CodebaseIndexer:
         return True
 
     def scan_indexable_files(
-        self, root_dir: Path, ignored_dirs: set[str], ignore_patterns: set[str]
+        self,
+        root_dir: Path,
+        ignored_dirs: set[str],
+        ignore_patterns: set[str],
+        max_files: int = 20000,
     ) -> list[Path]:
         """
         Scans directory tree and returns list of indexable files.
@@ -103,6 +107,7 @@ class CodebaseIndexer:
             root_dir: Root directory to scan
             ignored_dirs: Directories to skip
             ignore_patterns: File patterns to ignore
+            max_files: Maximum files to scan (safety limit)
 
         Returns:
             List of indexable file paths
@@ -110,9 +115,16 @@ class CodebaseIndexer:
         indexable_files = []
 
         for root, dirs, files in os.walk(root_dir):
+            if len(indexable_files) >= max_files:
+                logger.warning(f"Scan limit reached ({max_files} files). Stopping scan.")
+                break
+
             dirs[:] = [d for d in dirs if d not in ignored_dirs]
 
             for file in files:
+                if len(indexable_files) >= max_files:
+                    break
+
                 file_path = Path(root) / file
                 if self.should_index_file(file_path, ignore_patterns):
                     indexable_files.append(file_path)

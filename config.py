@@ -95,6 +95,16 @@ DEFAULT_IGNORED_DIRS: set[str] = {
     ".vscode",
     "dist",
     "build",
+    "target",  # Rust/Maven
+    "vendor",  # Go/PHP/Ruby
+    "bin",  # C#/Java
+    "obj",  # C#
+    "out",  # Java/Kotlin
+    "logs",
+    "tmp",
+    "temp",
+    ".cache",
+    ".gradle",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
