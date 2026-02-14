@@ -156,6 +156,306 @@ def load_index_ignore_patterns() -> set[str]:
         return set()
 
 
+@mcp.tool()
+def get_project_overview() -> str:
+    """
+    Returns a fast, lightweight overview of the project.
+    Does NOT require vector store or indexing.
+    Use this FIRST to understand the project before diving deeper.
+
+    Returns:
+        Project name, tech stack, root directories, file type counts, config files.
+    """
+    ensure_startup()
+    try:
+        root = config.PROJECT_ROOT
+        overview = [f"# PROJECT OVERVIEW: {root.name}\n"]
+        overview.append(f"**Root**: `{root}`\n")
+
+        config_files = []
+        tech_hints = []
+        for name, label in [
+            ("pyproject.toml", "Python (pyproject)"),
+            ("setup.py", "Python (setup.py)"),
+            ("requirements.txt", "Python (requirements)"),
+            ("package.json", "Node.js"),
+            ("Cargo.toml", "Rust"),
+            ("go.mod", "Go"),
+            ("pom.xml", "Java (Maven)"),
+            ("build.gradle", "Java (Gradle)"),
+            ("Gemfile", "Ruby"),
+            ("composer.json", "PHP"),
+            ("Dockerfile", "Docker"),
+            ("docker-compose.yml", "Docker Compose"),
+            (".gitignore", "Git"),
+        ]:
+            if (root / name).exists():
+                config_files.append(name)
+                if label not in ("Git",):
+                    tech_hints.append(label)
+
+        if tech_hints:
+            overview.append(f"**Tech**: {', '.join(tech_hints)}\n")
+
+        overview.append("## Root Directories")
+        try:
+            dirs = []
+            files_at_root = 0
+            for entry in sorted(root.iterdir(), key=lambda e: (not e.is_dir(), e.name)):
+                if entry.is_dir():
+                    if not is_dir_ignored(entry.name) and not entry.name.startswith("."):
+                        dirs.append(entry.name)
+                else:
+                    files_at_root += 1
+            for d in dirs:
+                overview.append(f"- `{d}/`")
+            if files_at_root:
+                overview.append(f"- ... and {files_at_root} files at root level")
+        except PermissionError:
+            overview.append("- (permission denied)")
+
+        file_types: dict[str, int] = {}
+        total_files = 0
+        for _root_path, dir_names, files in os.walk(root):
+            dir_names[:] = [d for d in dir_names if not is_dir_ignored(d)]
+            for file in files:
+                total_files += 1
+                ext = Path(file).suffix.lower()
+                if ext in config.INDEXABLE_EXTENSIONS:
+                    file_types[ext] = file_types.get(ext, 0) + 1
+
+        overview.append(f"\n## File Stats (total: {total_files})")
+        for ext, count in sorted(file_types.items(), key=lambda x: x[1], reverse=True)[:10]:
+            overview.append(f"- `{ext}`: {count}")
+
+        if config_files:
+            overview.append("\n## Config Files")
+            for cfg in config_files:
+                overview.append(f"- `{cfg}`")
+
+        overview.append(
+            "\n*Use `explore_directory(path)` to drill into specific directories, "
+            "`get_file_summary(path)` for file details.*"
+        )
+
+        return "\n".join(overview)
+    except Exception as e:
+        return f"Error generating overview: {e}"
+
+
+@mcp.tool()
+def explore_directory(path: str = ".", depth: int = 1, max_items: int = 100) -> str:
+    """
+    Lists files and subdirectories at the given path. Very fast, no indexing needed.
+    Use this to navigate the project tree level by level.
+
+    Args:
+        path: Directory path relative to project root (use "." for root).
+        depth: How many levels deep to show (1-3). Default 1.
+        max_items: Maximum items to return. Default 100.
+
+    Returns:
+        Tree-like listing of the directory contents.
+    """
+    ensure_startup()
+
+    if depth < 1:
+        depth = 1
+    if depth > 3:
+        depth = 3
+    if max_items < 1:
+        max_items = 1
+    if max_items > 500:
+        max_items = 500
+
+    try:
+        target = validate_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    if not target.exists():
+        return f"Path not found: {path}"
+    if not target.is_dir():
+        return f"Not a directory: {path}"
+
+    try:
+        rel = target.relative_to(config.PROJECT_ROOT)
+        header = str(rel) if str(rel) != "." else config.PROJECT_ROOT.name
+    except ValueError:
+        header = str(target)
+
+    lines = [f"# {header}/\n"]
+    count = [0]
+
+    def _walk(dir_path: Path, prefix: str, current_depth: int) -> None:
+        if count[0] >= max_items:
+            return
+        try:
+            entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        except PermissionError:
+            lines.append(f"{prefix}(permission denied)")
+            return
+
+        dirs_list = []
+        files_list = []
+        for entry in entries:
+            if entry.is_dir():
+                if not is_dir_ignored(entry.name) and not entry.name.startswith("."):
+                    dirs_list.append(entry)
+            else:
+                files_list.append(entry)
+
+        for d in dirs_list:
+            if count[0] >= max_items:
+                lines.append(f"{prefix}... (truncated)")
+                return
+            lines.append(f"{prefix}{d.name}/")
+            count[0] += 1
+            if current_depth < depth:
+                _walk(d, prefix + "  ", current_depth + 1)
+
+        for f in files_list:
+            if count[0] >= max_items:
+                lines.append(f"{prefix}... (truncated)")
+                return
+            try:
+                size = f.stat().st_size
+                if size < 1024:
+                    size_str = f"{size}B"
+                elif size < 1024 * 1024:
+                    size_str = f"{size / 1024:.1f}KB"
+                else:
+                    size_str = f"{size / 1024 / 1024:.1f}MB"
+            except OSError:
+                size_str = "?"
+            lines.append(f"{prefix}{f.name}  ({size_str})")
+            count[0] += 1
+
+    _walk(target, "", 1)
+
+    if count[0] == 0:
+        lines.append("(empty directory)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_file_summary(path: str, max_lines: int = 50) -> str:
+    """
+    Returns a lightweight summary of a file: size, imports, top-level definitions,
+    and the first N lines. Does NOT require indexing.
+
+    Args:
+        path: File path relative to project root.
+        max_lines: Max lines of content to include (default 50).
+
+    Returns:
+        File metadata, structure, and preview.
+    """
+    ensure_startup()
+
+    if max_lines < 0:
+        max_lines = 0
+    if max_lines > 500:
+        max_lines = 500
+
+    try:
+        target = validate_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    if not target.exists():
+        return f"File not found: {path}"
+    if not target.is_file():
+        return f"Not a file: {path}"
+
+    try:
+        stat = target.stat()
+        size_kb = stat.st_size / 1024
+    except OSError:
+        size_kb = 0
+
+    result = [f"# {target.name}\n"]
+    result.append(f"**Path**: `{target.relative_to(config.PROJECT_ROOT)}`")
+    result.append(f"**Size**: {size_kb:.1f} KB")
+    result.append(f"**Extension**: `{target.suffix}`")
+
+    if target.suffix in config.BINARY_EXTENSIONS:
+        result.append("\n(binary file — no preview)")
+        return "\n".join(result)
+
+    try:
+        content = config.safe_read_text(target)
+    except (UnicodeDecodeError, OSError) as e:
+        result.append(f"\n(cannot read: {e})")
+        return "\n".join(result)
+
+    lines = content.split("\n")
+    result.append(f"**Lines**: {len(lines)}")
+
+    ext = target.suffix.lower()
+    if ext == ".py":
+        imports = []
+        classes = []
+        functions = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith(("import ", "from ")):
+                imports.append(stripped)
+            elif stripped.startswith("class ") and ":" in stripped:
+                classes.append(stripped.split("(")[0].split(":")[0].replace("class ", "").strip())
+            elif stripped.startswith("def ") and ":" in stripped:
+                functions.append(stripped.split("(")[0].replace("def ", "").strip())
+
+        if imports:
+            result.append(f"\n**Imports** ({len(imports)}):")
+            for imp in imports[:15]:
+                result.append(f"  - `{imp}`")
+            if len(imports) > 15:
+                result.append(f"  - ... ({len(imports) - 15} more)")
+        if classes:
+            result.append(f"\n**Classes**: {', '.join(f'`{c}`' for c in classes)}")
+        if functions:
+            result.append(f"\n**Functions** ({len(functions)}):")
+            for fn in functions[:20]:
+                result.append(f"  - `{fn}`")
+            if len(functions) > 20:
+                result.append(f"  - ... ({len(functions) - 20} more)")
+
+    elif ext in (".js", ".ts", ".jsx", ".tsx"):
+        imports = []
+        exports = []
+        functions = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("import ") or stripped.startswith("const ") and "require(" in stripped:
+                imports.append(stripped[:100])
+            elif stripped.startswith("export "):
+                exports.append(stripped[:100])
+            elif "function " in stripped and ("function " == stripped[:9] or "async function" in stripped):
+                functions.append(stripped[:80])
+
+        if imports:
+            result.append(f"\n**Imports** ({len(imports)}):")
+            for imp in imports[:10]:
+                result.append(f"  - `{imp}`")
+        if exports:
+            result.append(f"\n**Exports** ({len(exports)}):")
+            for exp in exports[:10]:
+                result.append(f"  - `{exp}`")
+
+    if max_lines > 0:
+        preview_lines = lines[:max_lines]
+        result.append(f"\n## Preview (first {min(max_lines, len(lines))} lines)")
+        result.append("```" + ext.lstrip("."))
+        result.append("\n".join(preview_lines))
+        result.append("```")
+        if len(lines) > max_lines:
+            result.append(f"\n... ({len(lines) - max_lines} more lines)")
+
+    return "\n".join(result)
+
+
 @mcp.resource("project://memory")
 def get_project_memory() -> str:
     ctx = get_context()
@@ -439,7 +739,10 @@ def analyze_project_structure() -> str:
         for item in root.iterdir():
             if item.is_dir() and not is_dir_ignored(item.name):
                 try:
-                    count = sum(1 for _ in item.rglob("*") if _.is_file())
+                    count = 0
+                    for _r, _d, _f in os.walk(item):
+                        _d[:] = [d for d in _d if not is_dir_ignored(d)]
+                        count += len(_f)
                     dirs_by_depth[item.name] = count
                 except (PermissionError, OSError):
                     continue
