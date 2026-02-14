@@ -1,6 +1,6 @@
 # ProjectMind: Local Context & Memory MCP Server
 
-ProjectMind is a standalone MCP server that adds persistent memory and local vector search capabilities to your projects.
+ProjectMind is a standalone MCP server that gives AI coding assistants **persistent memory**, **progressive project exploration**, and **local vector search** capabilities. It works instantly on any project — no indexing required to start.
 
 ## Features
 
@@ -11,46 +11,50 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
 - **Git Integration**: Ingest git commit history into project memory to track development flow
 - **Local RAG**: Index your codebase and search it using local embeddings
 
+### Progressive Exploration (NEW in v0.6.0)
+- **🔥 Instant Project Overview**: `get_project_overview()` — tech stack, git info, memory context, file stats in < 1 second
+- **🔥 Drill-Down Navigation**: `explore_directory(path)` — browse project tree level by level with git change markers
+- **🔥 Smart File Summaries**: `get_file_summary(path)` — imports, classes, functions, git history, memory mentions
+- **No indexing required** — all three tools work instantly without ChromaDB or embeddings
+- **Context-aware** — every response enriched with data from memory and git history
+
 ### Advanced Features
 - **Smart Indexing**: 
-  - **🆕 Incremental indexing** - Only re-index changed files (10-100x faster)
+  - **Incremental indexing** - Only re-index changed files (10-100x faster)
   - Filters binary and non-text files automatically
   - Configurable file size limits (default 10MB)
   - Custom ignore patterns via `.ai/.indexignore`
   - Supports 50+ programming languages and text formats
-- **🆕 Advanced Search Filters**:
+- **Advanced Search Filters**:
   - Filter by file types
   - Exclude directories
   - Minimum relevance threshold
   - Relevance scores in results
-- **🆕 Automatic Memory Updates**:
+- **Automatic Memory Updates**:
   - Auto-summarize recent commits
   - Scheduled memory updates
   - Smart grouping by contributors
-- **🆕 Code Quality & Metrics**:
+- **Code Quality & Metrics**:
   - Cyclomatic complexity analysis
   - Pylint quality checks
   - Test coverage tracking
   - Technical debt detection
-- **🆕 Memory Versioning**:
+- **Memory Versioning**:
   - Git-like versioning for memory
   - Timestamped snapshots
   - Easy rollback and restore
   - Version history tracking
-- **🆕 Performance Caching & Optimization** (v0.4.0+):
+- **Performance Caching & Optimization** (v0.4.0+):
   - Multi-layer caching system (LRU, TTL, File caches)
-  - **🔥 NEW (v0.5.4)**: Intelligent project auto-detection (no manual config!)
-  - **🔥 NEW (v0.5.3)**: Memory pagination to prevent context window exhaustion
-  - **🔥 NEW (v0.5.3)**: Fixed project detection (cwd-based, works with any project)
-  - **🔥 NEW (v0.5.2)**: Lazy vector store initialization (30-60s faster startup)
-  - **🔥 NEW (v0.5.2)**: Fixed freezing on parallel memory reads
-  - **🔥 NEW (v0.5.1)**: Structure analysis caching (5-minute TTL)
-  - **🔥 NEW (v0.5.1)**: Optimized file system traversal (3x faster on large projects)
+  - Intelligent project auto-detection (no manual config!)
+  - Memory pagination to prevent context window exhaustion
+  - Lazy vector store initialization (30-60s faster startup)
+  - Structure analysis caching (5-minute TTL)
+  - Optimized file system traversal (3x faster on large projects)
   - Reduced disk I/O for file operations
   - 5-minute query result caching
   - Performance monitoring via `get_cache_stats()`
   - Thread-safe implementations
-  - Fixed server freezing on large codebases
 - **Production-Ready Architecture** (v0.5.0):
   - **Dependency Injection** - `AppContext` replaces global singletons for better testability
   - **Custom Exception Hierarchy** - Domain-specific exceptions for better error handling
@@ -72,7 +76,7 @@ ProjectMind is a standalone MCP server that adds persistent memory and local vec
 
 **Quick Links:**
 - 🚀 **[Getting Started Guide](docs/guides/getting-started.md)** - Installation, setup, first steps
-- 📖 **[Complete API Reference](docs/api/tools-reference.md)** - All 22 tools with examples
+- 📖 **[Complete API Reference](docs/api/tools-reference.md)** - All 25 tools with examples
 - 💡 **[Advanced Usage Guide](docs/guides/advanced-usage.md)** - Power features and workflows
 - 📁 **[Full Documentation](docs/)** - Complete documentation index
 
@@ -208,6 +212,96 @@ The server will automatically detect your project. If needed, you can manually s
 ```
 
 ## Available Tools
+
+### Progressive Exploration (Start Here!)
+
+These tools work **instantly** without indexing or vector store initialization. Use them to understand any project before diving into code.
+
+#### `get_project_overview()`
+Returns a comprehensive project overview combining file system, memory, and git data:
+- Project name, root path, active git branch, total commits
+- Tech stack (detected from config files + memory)
+- Project status and recent decisions (from memory)
+- Root directories and file type statistics
+- Recent git activity (last 7 days)
+
+**Use case:** First thing to call when opening a new or unfamiliar project.
+
+```
+# PROJECT OVERVIEW: my-app
+
+**Root**: `/home/user/my-app`
+**Git**: branch `main`, 142+ commits
+**Tech**: Node.js, Docker
+
+## Tech Stack (from memory)
+- Language: TypeScript
+- Framework: Next.js 14
+
+## Recent Activity (last 7 days)
+- 2026-02-14 [a1b2c3d]: fix: resolve auth race condition
+- 2026-02-13 [e4f5g6h]: feat: add payment webhook
+
+## Recent Decisions (from memory)
+- Switched from JWT to session-based auth
+```
+
+#### `explore_directory(path=".", depth=1, max_items=100)`
+Browse the project tree level by level with git context:
+- `path`: Directory path relative to project root (use `"."` for root)
+- `depth`: How many levels deep (1-3, default 1)
+- `max_items`: Maximum items to show (1-500, default 100)
+- Files changed in the last 14 days are annotated with the commit message
+- Memory mentions for the directory are shown at the bottom
+
+**Use case:** Navigate project structure and spot recently changed areas.
+
+```
+# src/
+
+controllers/
+  authController.ts  (4.2KB)  [changed 2026-02-14: fix auth race condition]
+  userController.ts  (3.1KB)
+models/
+utils/
+  logger.ts  (1.2KB)  [changed 2026-02-13: add structured logging]
+
+## Notes from memory
+- Refactored src to use hexagonal architecture
+```
+
+#### `get_file_summary(path, max_lines=50)`
+Get a detailed file summary with code structure, git history, and memory context:
+- `path`: File path relative to project root
+- `max_lines`: Lines of code preview to include (0-500, default 50)
+- Shows imports, classes, functions (Python, JS/TS)
+- Git history: last 5 commits that touched this file
+- Memory mentions: any notes about this file from project memory
+
+**Use case:** Understand a file before editing it.
+
+```
+# authController.ts
+
+**Path**: `src/controllers/authController.ts`
+**Size**: 4.2 KB
+**Last changed**: 2026-02-14 15:30 by John
+**Total changes**: 12+ commits
+
+**Imports** (5):
+  - `import { Request, Response } from 'express'`
+  - `import { AuthService } from '../services/auth'`
+
+**Exports** (3):
+  - `export async function login(req: Request, res: Response)`
+
+## Git History
+- 2026-02-14 15:30 [a1b2c3d] fix: resolve auth race condition (John)
+- 2026-02-10 09:15 [x7y8z9a] refactor: extract auth middleware (John)
+
+## Notes from memory
+- Switched from JWT to session-based auth in authController
+```
 
 ### Memory Management
 
@@ -427,37 +521,44 @@ get_cache_stats()
 
 ## Quick Start Examples
 
-### New to the project?
+### New to the project? (Recommended flow)
 ```python
-# Get instant overview
-generate_project_summary()
+# 1. Get instant overview (< 1 sec, no indexing needed)
+get_project_overview()
 
-# Understand tech stack
-extract_tech_stack()
+# 2. Explore the main directories
+explore_directory("src", depth=2)
 
-# See project structure
-analyze_project_structure()
+# 3. Understand a specific file
+get_file_summary("src/controllers/authController.ts")
+
+# 4. (Optional) Index for semantic search
+index_codebase()
+search_codebase("authentication login", n_results=10)
 ```
 
 ### Coming back after a break?
 ```python
+# Quick overview shows recent activity + decisions from memory
+get_project_overview()
+
 # What happened in last 2 weeks?
 get_recent_changes_summary(days=14)
 
-# Re-index to catch new code
-index_codebase()
-
-# Refresh memory with recent commits
-ingest_git_history(limit=50)
+# See what changed in specific directory
+explore_directory("src/controllers")
 ```
 
 ### Daily workflow
 ```python
-# Morning: catch up
-get_recent_changes_summary(days=1)
+# Morning: quick overview (memory + git)
+get_project_overview()
 
-# Find implementation: "How do we handle authentication?"
-search_codebase("authentication login", n_results=10)
+# Browse recently changed files
+explore_directory("src", depth=2)
+
+# Understand a file before editing
+get_file_summary("src/services/payment.ts")
 
 # Document decision
 update_memory("Switched to JWT tokens for better scalability", 
@@ -539,13 +640,15 @@ Reads the project memory file directly as a resource.
 ### Components
 
 **Core Server:**
-- **mcp_server.py**: Main server implementation with all MCP tools
+- **mcp_server.py**: Main server with all MCP tools, including progressive exploration tools with memory/git context
 - **config.py**: Centralized configuration management with security features
+- **context.py**: Dependency injection via `AppContext`
 
-**Class-Based Modules (v0.4.0):**
+**Class-Based Modules:**
 - **vector_store_manager.py**: ChromaDB management with query caching
 - **memory_manager.py**: Memory operations with versioning support
 - **codebase_indexer.py**: File scanning, chunking, and indexing logic
+- **git_utils.py**: Git operations (commits, file history, recently changed files, branch info)
 - **cache_manager.py**: Multi-layer caching (LRU, TTL, File caches)
 - **logger.py**: Centralized rotating file logging
 - **incremental_indexing.py**: Atomic metadata operations
@@ -569,14 +672,17 @@ Reads the project memory file directly as a resource.
 
 ## Troubleshooting
 
+### Server hangs for 10-15 minutes on large projects
+Use the progressive exploration tools (`get_project_overview`, `explore_directory`, `get_file_summary`) instead of `index_codebase`. These work instantly without loading ML models or indexing files. Only call `index_codebase` when you need semantic search.
+
 ### Vector store not initialized
-The vector store is lazy-loaded on first use. Run `index_codebase()` first.
+The vector store is lazy-loaded on first use. Run `index_codebase()` first. The progressive exploration tools do **not** require the vector store.
 
 ### Large files being skipped
 Files larger than 10MB are skipped by default. Set `PROJECTMIND_MAX_FILE_SIZE_MB` to increase the limit.
 
 ### Git history not showing
-Ensure you're in a git repository. The tool searches parent directories automatically.
+Ensure you're in a git repository. The tool searches parent directories automatically. If git is unavailable, the tools still work — they just skip git-related sections.
 
 ## Contributing
 
