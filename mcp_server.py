@@ -613,6 +613,78 @@ def get_file_summary(path: str, max_lines: int = 50) -> str:
     return "\n".join(result)
 
 
+@mcp.tool()
+def detect_project_conventions() -> str:
+    """
+    Auto-detects project conventions: naming style, test patterns, frameworks,
+    linting/formatting tools, error handling, logging, architecture.
+    Does NOT require indexing. Results can be saved to memory for future reference.
+
+    Returns:
+        Formatted conventions report.
+    """
+    ensure_startup()
+    try:
+        from code_intelligence import detect_conventions
+
+        return detect_conventions(config.PROJECT_ROOT)
+    except Exception as e:
+        return f"Error detecting conventions: {e}"
+
+
+@mcp.tool()
+def get_file_relations(path: str) -> str:
+    """
+    Shows import relationships for a file: what it imports, what imports it,
+    and related test files. Built from static analysis (no indexing needed).
+
+    Args:
+        path: File path relative to project root.
+
+    Returns:
+        Import graph and impact assessment for the file.
+    """
+    ensure_startup()
+    try:
+        target = validate_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    if not target.exists():
+        return f"File not found: {path}"
+    if not target.is_file():
+        return f"Not a file: {path}"
+
+    try:
+        from code_intelligence import get_file_relations as _get_relations
+
+        rel_path = str(target.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
+        return _get_relations(rel_path, config.PROJECT_ROOT)
+    except Exception as e:
+        return f"Error analyzing relations: {e}"
+
+
+@mcp.tool()
+def find_todos(tag: str | None = None) -> str:
+    """
+    Scans the codebase for TODO, FIXME, HACK, BUG, XXX comments.
+    Does NOT require indexing.
+
+    Args:
+        tag: Optional filter by tag (e.g. "TODO", "FIXME"). None = all tags.
+
+    Returns:
+        Summary and list of all TODO-like comments with file locations.
+    """
+    ensure_startup()
+    try:
+        from code_intelligence import extract_todos
+
+        return extract_todos(config.PROJECT_ROOT, tag_filter=tag)
+    except Exception as e:
+        return f"Error scanning TODOs: {e}"
+
+
 @mcp.resource("project://memory")
 def get_project_memory() -> str:
     ctx = get_context()
