@@ -742,66 +742,66 @@ def get_dependencies_with_depth(
 ) -> str:
     """
     Gets file dependencies up to specified depth in the import graph.
-    
+
     Args:
         file_path: File path relative to project root
         depth: How many levels deep to traverse (1-5, default 2)
         direction: "downstream" (what it imports) or "upstream" (what imports it)
-    
+
     Returns:
         List of files with their distance from the target file
     """
     ensure_startup()
-    
+
     if depth < 1 or depth > 5:
         return "Error: depth must be between 1 and 5"
-    
+
     if direction not in ("downstream", "upstream"):
         return "Error: direction must be 'downstream' or 'upstream'"
-    
+
     try:
         target = validate_path(file_path)
     except ValueError as e:
         return f"Error: {e}"
-    
+
     if not target.exists():
         return f"File not found: {file_path}"
-    
+
     try:
         from code_intelligence import build_import_graph, get_dependencies_with_depth as _get_deps
-        
+
         rel_path = str(target.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
         graph = build_import_graph(config.PROJECT_ROOT)
-        
+
         if rel_path not in graph and direction == "downstream":
             return f"File not in import graph: {file_path}"
-        
+
         deps = _get_deps(rel_path, graph, depth, direction)
-        
+
         if not deps:
             dir_label = "imports" if direction == "downstream" else "importers"
             return f"No {dir_label} found within depth {depth}"
-        
+
         lines = [f"# DEPENDENCIES ({direction.upper()}) - depth {depth}\n"]
         lines.append(f"Starting from: `{rel_path}`\n")
-        
+
         # Group by distance
         by_distance: dict[int, list[str]] = {}
         for file, dist in deps.items():
             if dist not in by_distance:
                 by_distance[dist] = []
             by_distance[dist].append(file)
-        
+
         for dist in sorted(by_distance.keys()):
             files = sorted(by_distance[dist])
             lines.append(f"## Level {dist} ({len(files)} files)")
             for f in files:
                 lines.append(f"- `{f}`")
             lines.append("")
-        
+
         lines.append(f"**Total**: {len(deps)} files")
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -810,60 +810,60 @@ def get_dependencies_with_depth(
 def find_dependency_path(from_file: str, to_file: str, max_depth: int = 10) -> str:
     """
     Finds the shortest dependency path between two files.
-    
+
     Args:
         from_file: Source file path (relative to project root)
-        to_file: Target file path (relative to project root)  
+        to_file: Target file path (relative to project root)
         max_depth: Maximum search depth (default 10)
-    
+
     Returns:
         Dependency chain from source to target, or message if no path found
     """
     ensure_startup()
-    
+
     if max_depth < 1 or max_depth > 20:
         return "Error: max_depth must be between 1 and 20"
-    
+
     try:
         source = validate_path(from_file)
         target = validate_path(to_file)
     except ValueError as e:
         return f"Error: {e}"
-    
+
     if not source.exists():
         return f"Source file not found: {from_file}"
     if not target.exists():
         return f"Target file not found: {to_file}"
-    
+
     try:
         from code_intelligence import build_import_graph, find_dependency_path as _find_path
-        
+
         source_rel = str(source.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
         target_rel = str(target.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
-        
+
         graph = build_import_graph(config.PROJECT_ROOT)
         path = _find_path(source_rel, target_rel, graph, max_depth)
-        
+
         if path is None:
             return f"No dependency path found from `{from_file}` to `{to_file}` within depth {max_depth}"
-        
+
         if len(path) == 1:
             return f"`{from_file}` and `{to_file}` are the same file"
-        
+
         lines = [f"# DEPENDENCY PATH\n"]
         lines.append(f"From: `{from_file}`")
         lines.append(f"To: `{to_file}`")
         lines.append(f"Distance: {len(path) - 1} steps\n")
         lines.append("## Path")
-        
+
         for i, file in enumerate(path):
             if i < len(path) - 1:
                 lines.append(f"{i + 1}. `{file}` →")
             else:
                 lines.append(f"{i + 1}. `{file}`")
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -875,59 +875,59 @@ def get_module_cluster(
     """
     Finds files closely related to the target based on shared dependencies.
     Uses Jaccard similarity to identify modules that work together.
-    
+
     Args:
         file_path: File path relative to project root
         similarity_threshold: Minimum similarity score 0.0-1.0 (default 0.3)
         max_cluster_size: Maximum number of related files (default 20)
-    
+
     Returns:
         List of related files sorted by similarity score
     """
     ensure_startup()
-    
+
     if not 0.0 <= similarity_threshold <= 1.0:
         return "Error: similarity_threshold must be between 0.0 and 1.0"
-    
+
     if max_cluster_size < 1 or max_cluster_size > 100:
         return "Error: max_cluster_size must be between 1 and 100"
-    
+
     try:
         target = validate_path(file_path)
     except ValueError as e:
         return f"Error: {e}"
-    
+
     if not target.exists():
         return f"File not found: {file_path}"
-    
+
     try:
         from code_intelligence import get_module_cluster as _get_cluster
-        
+
         rel_path = str(target.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
         cluster = _get_cluster(rel_path, config.PROJECT_ROOT, similarity_threshold, max_cluster_size)
-        
+
         if not cluster:
             return f"No related modules found with similarity >= {similarity_threshold}"
-        
+
         lines = [f"# MODULE CLUSTER\n"]
         lines.append(f"Target: `{file_path}`")
         lines.append(f"Similarity threshold: {similarity_threshold}")
         lines.append(f"Found: {len(cluster)} related files\n")
         lines.append("## Related Modules (by similarity)")
-        
+
         for file, score in cluster.items():
             percentage = int(score * 100)
             lines.append(f"- `{file}` — {percentage}% similar")
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
 
 @mcp.tool()
 def search_with_dependencies(
-    query: str, 
+    query: str,
     n_results: int = 5,
     include_deps: bool = True,
     depth: int = 1
@@ -935,82 +935,82 @@ def search_with_dependencies(
     """
     Searches codebase and optionally includes dependencies of matching files.
     Combines semantic search with structural dependency analysis.
-    
+
     Args:
         query: Search query
         n_results: Number of semantic search results (default 5)
         include_deps: Whether to include dependencies (default True)
         depth: Dependency depth to include if include_deps=True (default 1)
-    
+
     Returns:
         Search results with optional dependency context
     """
     ensure_startup()
-    
+
     if not query or not query.strip():
         return "Error: query cannot be empty"
-    
+
     if n_results < 1 or n_results > 50:
         return "Error: n_results must be between 1 and 50"
-    
+
     if depth < 1 or depth > 3:
         return "Error: depth must be between 1 and 3"
-    
+
     try:
         # First do semantic search
         ctx = get_context()
         coll = ctx.vector_store.get_collection()
-        
+
         if coll is None:
             return "Vector store not initialized. Run index_codebase() first."
-        
+
         results = ctx.vector_store.query(query_texts=[query], n_results=n_results)
-        
+
         if not results or not results.get("documents") or not results["documents"][0]:
             return "No results found"
-        
+
         # Extract matching files
         metadatas = results.get("metadatas", [[]])[0]
         matching_files = set()
         for meta in metadatas:
             if "file_path" in meta:
                 matching_files.add(meta["file_path"])
-        
+
         lines = [f"# SEARCH RESULTS: {query}\n"]
         lines.append(f"Found {len(matching_files)} matching files\n")
         lines.append("## Direct Matches")
-        
+
         for file in sorted(matching_files):
             lines.append(f"- `{file}`")
-        
+
         # Optionally add dependencies
         if include_deps and matching_files:
             from code_intelligence import build_import_graph, get_dependencies_with_depth as _get_deps
-            
+
             graph = build_import_graph(config.PROJECT_ROOT)
             all_deps: set[str] = set()
-            
+
             for file in matching_files:
                 # Get both upstream and downstream
                 downstream = _get_deps(file, graph, depth, "downstream")
                 upstream = _get_deps(file, graph, depth, "upstream")
                 all_deps.update(downstream.keys())
                 all_deps.update(upstream.keys())
-            
+
             # Remove files already in matches
             all_deps = all_deps - matching_files
-            
+
             if all_deps:
                 lines.append(f"\n## Related Dependencies (depth {depth})")
                 lines.append(f"Found {len(all_deps)} additional files")
                 for dep in sorted(all_deps)[:20]:  # Limit to 20
                     lines.append(f"- `{dep}`")
-                
+
                 if len(all_deps) > 20:
                     lines.append(f"\n... and {len(all_deps) - 20} more")
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -1027,85 +1027,85 @@ def search_for_errors(
     - Test files
     - Similar error patterns
     - Related git commits (if error recently introduced)
-    
+
     Args:
         error_text: The error message or exception type
         stacktrace: Optional stacktrace for better context
         n_results: Number of results per category (default 5)
-    
+
     Returns:
         Organized results focusing on debugging context
     """
     ensure_startup()
-    
+
     if not error_text.strip():
         return "Error: error_text cannot be empty"
-    
+
     try:
         ctx = get_context()
         coll = ctx.vector_store.get_collection()
-        
+
         if coll is None:
             return "Vector store not initialized. Run index_codebase() first."
-        
+
         # Combine error and stacktrace for better search
         full_query = error_text
         if stacktrace:
             full_query = f"{error_text} {stacktrace}"
-        
+
         # Search in code
         code_results = ctx.vector_store.query(query_texts=[full_query], n_results=n_results)
-        
+
         # Search specifically for exception handling
         exception_query = f"exception error handling try catch {error_text}"
         exception_results = ctx.vector_store.query(query_texts=[exception_query], n_results=n_results)
-        
+
         # Search for tests
         test_query = f"test {error_text}"
         test_results = ctx.vector_store.query(query_texts=[test_query], n_results=n_results)
-        
+
         lines = [f"# ERROR DEBUGGING SEARCH\n"]
         lines.append(f"Error: {error_text}\n")
-        
+
         # Code matches
         if code_results and code_results.get("documents") and code_results["documents"][0]:
             metadatas = code_results.get("metadatas", [[]])[0]
             files = set(meta.get("file_path", "") for meta in metadatas if meta.get("file_path"))
-            
+
             lines.append("## Related Code")
             for file in sorted(files):
                 lines.append(f"- `{file}`")
             lines.append("")
-        
+
         # Exception handling matches
         if exception_results and exception_results.get("documents") and exception_results["documents"][0]:
             metadatas = exception_results.get("metadatas", [[]])[0]
             files = set(meta.get("file_path", "") for meta in metadatas if meta.get("file_path"))
-            
+
             lines.append("## Error Handlers")
             for file in sorted(files):
                 lines.append(f"- `{file}`")
             lines.append("")
-        
-        # Test matches  
+
+        # Test matches
         if test_results and test_results.get("documents") and test_results["documents"][0]:
             metadatas = test_results.get("metadatas", [[]])[0]
             files = set(meta.get("file_path", "") for meta in metadatas if meta.get("file_path"))
             test_files = {f for f in files if "test" in f.lower() or "spec" in f.lower()}
-            
+
             if test_files:
                 lines.append("## Related Tests")
                 for file in sorted(test_files):
                     lines.append(f"- `{file}`")
                 lines.append("")
-        
+
         # Git history if available
         if ctx.git_repo:
             try:
                 from git_utils import CommitInfo
                 commits = ctx.git_repo.get_commits(max_count=50, since_days=30)
                 error_commits = [c for c in commits if error_text.lower() in c.message.lower()]
-                
+
                 if error_commits:
                     lines.append("## Recent Related Commits")
                     for commit in error_commits[:5]:
@@ -1113,9 +1113,9 @@ def search_for_errors(
                     lines.append("")
             except Exception:
                 pass
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -1131,39 +1131,39 @@ def search_for_feature(
     - Configuration files
     - Related tests
     - Documentation
-    
+
     Args:
         feature_name: Name or description of the feature
         n_results: Number of results per category (default 10)
-    
+
     Returns:
         Organized results showing feature implementation structure
     """
     ensure_startup()
-    
+
     if not feature_name.strip():
         return "Error: feature_name cannot be empty"
-    
+
     try:
         ctx = get_context()
         coll = ctx.vector_store.get_collection()
-        
+
         if coll is None:
             return "Vector store not initialized. Run index_codebase() first."
-        
+
         # Main search
         main_results = ctx.vector_store.query(query_texts=[feature_name], n_results=n_results)
-        
+
         # Config search
         config_query = f"config configuration {feature_name}"
         config_results = ctx.vector_store.query(query_texts=[config_query], n_results=5)
-        
+
         # Test search
         test_query = f"test {feature_name}"
         test_results = ctx.vector_store.query(query_texts=[test_query], n_results=5)
-        
+
         lines = [f"# FEATURE SEARCH: {feature_name}\n"]
-        
+
         # Main implementations
         if main_results and main_results.get("documents") and main_results["documents"][0]:
             metadatas = main_results.get("metadatas", [[]])[0]
@@ -1172,13 +1172,13 @@ def search_for_feature(
                 fp = meta.get("file_path", "")
                 if fp and "test" not in fp.lower() and "spec" not in fp.lower():
                     files.append(fp)
-            
+
             if files:
                 lines.append("## Main Implementation")
                 for file in sorted(set(files)):
                     lines.append(f"- `{file}`")
                 lines.append("")
-        
+
         # Configuration files
         if config_results and config_results.get("documents") and config_results["documents"][0]:
             metadatas = config_results.get("metadatas", [[]])[0]
@@ -1187,13 +1187,13 @@ def search_for_feature(
                 fp = meta.get("file_path", "")
                 if fp and any(x in fp.lower() for x in ["config", "settings", "env", ".json", ".yaml", ".toml"]):
                     files.add(fp)
-            
+
             if files:
                 lines.append("## Configuration")
                 for file in sorted(files):
                     lines.append(f"- `{file}`")
                 lines.append("")
-        
+
         # Tests
         if test_results and test_results.get("documents") and test_results["documents"][0]:
             metadatas = test_results.get("metadatas", [[]])[0]
@@ -1202,34 +1202,34 @@ def search_for_feature(
                 fp = meta.get("file_path", "")
                 if fp and ("test" in fp.lower() or "spec" in fp.lower()):
                     files.add(fp)
-            
+
             if files:
                 lines.append("## Tests")
                 for file in sorted(files):
                     lines.append(f"- `{file}`")
                 lines.append("")
-        
+
         # Add dependency analysis if we found implementation files
         from code_intelligence import build_import_graph, get_dependencies_with_depth as _get_deps
-        
+
         if main_results and main_results.get("metadatas"):
             impl_files = [m.get("file_path") for m in main_results["metadatas"][0] if m.get("file_path")][:3]
             graph = build_import_graph(config.PROJECT_ROOT)
-            
+
             entry_points = []
             for file in impl_files:
                 if file in graph:
                     upstream = _get_deps(file, graph, depth=1, direction="upstream")
                     if not upstream:  # No one imports this = potential entry point
                         entry_points.append(file)
-            
+
             if entry_points:
                 lines.append("## Potential Entry Points")
                 for file in entry_points:
                     lines.append(f"- `{file}`")
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -1245,48 +1245,48 @@ def search_architecture(
     - Module dependencies
     - Configuration and setup
     - Architectural patterns
-    
+
     Args:
         component: Component or module name (e.g., "auth", "database", "api")
         n_results: Number of results (default 10)
-    
+
     Returns:
         Architectural overview with dependency relationships
     """
     ensure_startup()
-    
+
     if not component.strip():
         return "Error: component cannot be empty"
-    
+
     try:
         from code_intelligence import build_import_graph, get_module_cluster as _get_cluster
-        
+
         ctx = get_context()
         coll = ctx.vector_store.get_collection()
-        
+
         if coll is None:
             return "Vector store not initialized. Run index_codebase() first."
-        
+
         # Search for component
         results = ctx.vector_store.query(query_texts=[component], n_results=n_results)
-        
+
         if not results or not results.get("documents") or not results["documents"][0]:
             return f"No results found for component: {component}"
-        
+
         metadatas = results.get("metadatas", [[]])[0]
         main_files = [meta.get("file_path") for meta in metadatas if meta.get("file_path")]
-        
+
         lines = [f"# ARCHITECTURE: {component}\n"]
-        
+
         if main_files:
             lines.append("## Core Modules")
             for file in sorted(set(main_files)):
                 lines.append(f"- `{file}`")
             lines.append("")
-            
+
             # Build dependency graph
             graph = build_import_graph(config.PROJECT_ROOT)
-            
+
             # Find entry points (files with no upstream dependencies in this set)
             entry_points = []
             for file in main_files[:5]:
@@ -1299,9 +1299,9 @@ def search_architecture(
                             lines.append(f"- `{related}` ({pct}% similar)")
                         lines.append("")
                         break
-        
+
         return "\n".join(lines)
-        
+
     except Exception as e:
         return f"Error: {e}"
 
@@ -1512,45 +1512,45 @@ def search_codebase(query: str, n_results: int = 5) -> str:
 
         if not results.get("documents") or not results["documents"][0]:
             return "No matches found."
-        
+
         # Extract files and calculate coverage
         files = set()
         for meta in results.get("metadatas", [[]])[0]:
             if "file_path" in meta:
                 files.add(meta["file_path"])
-        
+
         # Check index coverage
         total_count = ctx.vector_store.get_count()
         coverage = "full" if total_count and total_count > 100 else "partial"
-        
+
         # Calculate average relevance (distance)
         distances = results.get("distances", [[]])[0]
         avg_distance = sum(distances) / len(distances) if distances else 0
         confidence = max(0.0, min(1.0, 1.0 - avg_distance))  # Convert distance to confidence
-        
+
         # Build output with metadata
         output = [f"# SEARCH: {query}\n"]
         output.append(f"**Results**: {len(results['documents'][0])}")
         output.append(f"**Confidence**: {int(confidence * 100)}%")
         output.append(f"**Coverage**: {coverage}")
         output.append(f"**Files**: {len(files)}\n")
-        
+
         # Add results
         for i in range(len(results["documents"][0])):
             doc = results["documents"][0][i]
             meta = results["metadatas"][0][i]
             source = meta.get("source", "unknown")
             file_path = meta.get("file_path", "")
-            
+
             relevance_score = 0
             if distances and i < len(distances):
                 relevance_score = max(0, int((1 - distances[i]) * 100))
-            
+
             output.append(f"## Result {i + 1} ({relevance_score}% relevant)")
             if file_path:
                 output.append(f"**File**: `{file_path}`")
             output.append(f"```\n{doc}\n```\n")
-        
+
         # Add suggestions based on results
         suggestions = []
         if confidence < 0.5:
@@ -1559,12 +1559,12 @@ def search_codebase(query: str, n_results: int = 5) -> str:
             suggestions.append("Few files matched - try broader search terms")
         if coverage == "partial":
             suggestions.append("Partial index coverage - run index_codebase() for complete results")
-        
+
         if suggestions:
             output.append("## Suggestions")
             for s in suggestions:
                 output.append(f"- {s}")
-        
+
         return "\n".join(output)
     except Exception as e:
         log(f"Search error: {e}")
@@ -1628,7 +1628,7 @@ def get_index_stats() -> str:
     vector_db_path = config.VECTOR_STORE_DIR / "chroma.sqlite3"
     if not vector_db_path.exists():
         return "Vector store not initialized. Run index_codebase() first."
-    
+
     # Only create context if vector DB exists
     ctx = get_context()
     if not ctx.vector_store._initialized:

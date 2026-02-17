@@ -483,19 +483,19 @@ def get_dependencies_with_depth(
 ) -> dict[str, int]:
     """
     Traverses dependency graph from file_path up to specified depth.
-    
+
     Args:
         file_path: Starting file path (normalized, forward slashes)
         graph: Import graph (file -> [imported files])
         depth: Maximum depth to traverse (1-5)
         direction: "downstream" (what it imports) or "upstream" (what imports it)
-    
+
     Returns:
         Dict mapping file_path -> distance from origin
     """
     if depth < 1 or depth > 5:
         depth = 2
-    
+
     # Build reverse graph for upstream traversal
     if direction == "upstream":
         reverse_graph: dict[str, list[str]] = {}
@@ -507,23 +507,23 @@ def get_dependencies_with_depth(
         working_graph = reverse_graph
     else:
         working_graph = graph
-    
+
     # BFS traversal
     visited: dict[str, int] = {file_path: 0}
     queue: list[tuple[str, int]] = [(file_path, 0)]
-    
+
     while queue:
         current, dist = queue.pop(0)
-        
+
         if dist >= depth:
             continue
-        
+
         neighbors = working_graph.get(current, [])
         for neighbor in neighbors:
             if neighbor not in visited:
                 visited[neighbor] = dist + 1
                 queue.append((neighbor, dist + 1))
-    
+
     # Remove origin file
     visited.pop(file_path, None)
     return visited
@@ -534,37 +534,37 @@ def find_dependency_path(
 ) -> list[str] | None:
     """
     Finds shortest path between two files in dependency graph.
-    
+
     Args:
         from_file: Source file path
         to_file: Target file path
         graph: Import graph
         max_depth: Maximum search depth
-    
+
     Returns:
         List of file paths forming the dependency chain, or None if no path
     """
     if from_file == to_file:
         return [from_file]
-    
+
     # BFS with path tracking
     visited: set[str] = {from_file}
     queue: list[tuple[str, list[str]]] = [(from_file, [from_file])]
-    
+
     while queue:
         current, path = queue.pop(0)
-        
+
         if len(path) > max_depth:
             continue
-        
+
         for neighbor in graph.get(current, []):
             if neighbor == to_file:
                 return path + [neighbor]
-            
+
             if neighbor not in visited:
                 visited.add(neighbor)
                 queue.append((neighbor, path + [neighbor]))
-    
+
     return None
 
 
@@ -573,52 +573,52 @@ def get_module_cluster(
 ) -> dict[str, float]:
     """
     Finds files that are closely related to the given file based on shared dependencies.
-    
+
     Args:
         file_path: Target file path (normalized)
         root: Project root
         similarity_threshold: Minimum Jaccard similarity (0.0-1.0)
         max_cluster_size: Maximum number of related files to return
-    
+
     Returns:
         Dict mapping file_path -> similarity_score, sorted by score descending
     """
     graph = build_import_graph(root, max_files=3000)
-    
+
     norm_path = file_path.replace("\\", "/")
     if norm_path not in graph:
         return {}
-    
+
     # Get all dependencies (imports + importers)
     target_imports = set(graph.get(norm_path, []))
     target_importers = {src for src, targets in graph.items() if norm_path in targets}
     target_deps = target_imports | target_importers
-    
+
     if not target_deps:
         return {}
-    
+
     # Calculate Jaccard similarity with all other files
     similarities: dict[str, float] = {}
-    
+
     for other_file, other_imports in graph.items():
         if other_file == norm_path:
             continue
-        
+
         other_importers = {src for src, targets in graph.items() if other_file in targets}
         other_deps = set(other_imports) | other_importers
-        
+
         if not other_deps:
             continue
-        
+
         # Jaccard similarity: intersection / union
         intersection = len(target_deps & other_deps)
         union = len(target_deps | other_deps)
-        
+
         if union > 0:
             similarity = intersection / union
             if similarity >= similarity_threshold:
                 similarities[other_file] = similarity
-    
+
     # Sort by similarity and limit size
     sorted_similar = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
     return dict(sorted_similar[:max_cluster_size])
