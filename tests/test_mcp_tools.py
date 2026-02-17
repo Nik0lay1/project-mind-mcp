@@ -34,7 +34,7 @@ except ImportError as e:
 
 def test_memory_tools() -> None:
     print("\n--- Testing Memory Tools ---")
-    
+
     # Ensure memory file is initialized
     ensure_startup()
 
