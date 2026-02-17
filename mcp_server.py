@@ -906,7 +906,9 @@ def get_module_cluster(
         from code_intelligence import get_module_cluster as _get_cluster
 
         rel_path = str(target.relative_to(config.PROJECT_ROOT)).replace("\\", "/")
-        cluster = _get_cluster(rel_path, config.PROJECT_ROOT, similarity_threshold, max_cluster_size)
+        cluster = _get_cluster(
+            rel_path, config.PROJECT_ROOT, similarity_threshold, max_cluster_size
+        )
 
         if not cluster:
             return f"No related modules found with similarity >= {similarity_threshold}"
@@ -929,10 +931,7 @@ def get_module_cluster(
 
 @mcp.tool()
 def search_with_dependencies(
-    query: str,
-    n_results: int = 5,
-    include_deps: bool = True,
-    depth: int = 1
+    query: str, n_results: int = 5, include_deps: bool = True, depth: int = 1
 ) -> str:
     """
     Searches codebase and optionally includes dependencies of matching files.
@@ -1019,11 +1018,7 @@ def search_with_dependencies(
 
 
 @mcp.tool()
-def search_for_errors(
-    error_text: str,
-    stacktrace: str = "",
-    n_results: int = 5
-) -> str:
+def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5) -> str:
     """
     Specialized search for debugging errors. Automatically searches in:
     - Error handlers and exception code
@@ -1061,7 +1056,9 @@ def search_for_errors(
 
         # Search specifically for exception handling
         exception_query = f"exception error handling try catch {error_text}"
-        exception_results = ctx.vector_store.query(query_texts=[exception_query], n_results=n_results)
+        exception_results = ctx.vector_store.query(
+            query_texts=[exception_query], n_results=n_results
+        )
 
         # Search for tests
         test_query = f"test {error_text}"
@@ -1081,7 +1078,11 @@ def search_for_errors(
             lines.append("")
 
         # Exception handling matches
-        if exception_results and exception_results.get("documents") and exception_results["documents"][0]:
+        if (
+            exception_results
+            and exception_results.get("documents")
+            and exception_results["documents"][0]
+        ):
             metadatas = exception_results.get("metadatas", [[]])[0]
             files = {meta.get("file_path", "") for meta in metadatas if meta.get("file_path")}
 
@@ -1123,10 +1124,7 @@ def search_for_errors(
 
 
 @mcp.tool()
-def search_for_feature(
-    feature_name: str,
-    n_results: int = 10
-) -> str:
+def search_for_feature(feature_name: str, n_results: int = 10) -> str:
     """
     Specialized search for understanding a feature. Automatically finds:
     - Entry points and main implementations
@@ -1187,7 +1185,10 @@ def search_for_feature(
             files = set()
             for meta in metadatas:
                 fp = meta.get("file_path", "")
-                if fp and any(x in fp.lower() for x in ["config", "settings", "env", ".json", ".yaml", ".toml"]):
+                if fp and any(
+                    x in fp.lower()
+                    for x in ["config", "settings", "env", ".json", ".yaml", ".toml"]
+                ):
                     files.add(fp)
 
             if files:
@@ -1216,7 +1217,9 @@ def search_for_feature(
         from code_intelligence import get_dependencies_with_depth as _get_deps
 
         if main_results and main_results.get("metadatas"):
-            impl_files = [m.get("file_path") for m in main_results["metadatas"][0] if m.get("file_path")][:3]
+            impl_files = [
+                m.get("file_path") for m in main_results["metadatas"][0] if m.get("file_path")
+            ][:3]
             graph = build_import_graph(config.PROJECT_ROOT)
 
             # Find files with no upstream dependencies (potential entry points)
@@ -1234,10 +1237,7 @@ def search_for_feature(
 
 
 @mcp.tool()
-def search_architecture(
-    component: str,
-    n_results: int = 10
-) -> str:
+def search_architecture(component: str, n_results: int = 10) -> str:
     """
     Specialized search for understanding architecture. Finds:
     - Core modules and entry points
@@ -1290,7 +1290,9 @@ def search_architecture(
             # Find related modules using clustering
             for file in main_files[:5]:
                 if file in graph:
-                    cluster = _get_cluster(file, config.PROJECT_ROOT, similarity_threshold=0.4, max_cluster_size=10)
+                    cluster = _get_cluster(
+                        file, config.PROJECT_ROOT, similarity_threshold=0.4, max_cluster_size=10
+                    )
                     if cluster:
                         lines.append(f"## Related to `{file}`")
                         for related, score in list(cluster.items())[:5]:
@@ -1458,6 +1460,7 @@ def read_memory(max_lines: int | None = 100) -> str:
 def update_memory(content: str, section: str = "Recent Decisions") -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.update(content, section)
 
@@ -1466,6 +1469,7 @@ def update_memory(content: str, section: str = "Recent Decisions") -> str:
 def clear_memory(keep_template: bool = True) -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.clear(keep_template)
 
@@ -1474,6 +1478,7 @@ def clear_memory(keep_template: bool = True) -> str:
 def delete_memory_section(section_name: str) -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.delete_section(section_name)
 
@@ -2211,6 +2216,7 @@ def get_test_coverage_info() -> str:
 def save_memory_version(description: str = "") -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.save_version(description)
 
@@ -2219,6 +2225,7 @@ def save_memory_version(description: str = "") -> str:
 def list_memory_versions() -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.list_versions()
 
@@ -2227,6 +2234,7 @@ def list_memory_versions() -> str:
 def restore_memory_version(timestamp: str) -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager
+
     mm = MemoryManager()
     return mm.restore_version(timestamp)
 
