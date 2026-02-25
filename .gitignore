@@ -38,6 +38,11 @@ logs.md
 # Documentation drafts (keep only final docs in docs/)
 VSCODE_SETTINGS_TO_ADD.json
 ZENCODER_*.md
+PERFORMANCE_FIX.md
+
+# Personal git config
+.gitmessage
+.gitmsg
 
 # Scripts (if personal/temporary)
 scripts/organize_docs.py

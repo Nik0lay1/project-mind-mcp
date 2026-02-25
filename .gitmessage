@@ -1,6 +1,0 @@
-docs: release v0.6.0 - code intelligence and advanced analysis
-
-- Bump version to 0.6.0 in pyproject.toml
-- Add CHANGELOG entry for v0.6.0 with all new features
-- Update README with 7 new code intelligence tools
-- Update tool count from 25 to 29 in documentation
