@@ -1520,8 +1520,8 @@ def search_codebase(query: str, n_results: int = 5) -> str:
         # Extract files and calculate coverage
         files = set()
         for meta in results.get("metadatas", [[]])[0]:
-            if "file_path" in meta:
-                files.add(meta["file_path"])
+            if "source" in meta:
+                files.add(meta["source"])
 
         # Check index coverage
         total_count = ctx.vector_store.get_count()
@@ -1543,7 +1543,7 @@ def search_codebase(query: str, n_results: int = 5) -> str:
         for i in range(len(results["documents"][0])):
             doc = results["documents"][0][i]
             meta = results["metadatas"][0][i]
-            file_path = meta.get("file_path", "")
+            file_path = meta.get("source", "")
 
             relevance_score = 0
             if distances and i < len(distances):

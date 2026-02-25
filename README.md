@@ -3,7 +3,7 @@
 ProjectMind is a standalone MCP server that gives AI coding assistants **persistent memory**, **progressive project exploration**, **graph-enhanced search**, and **local vector search** capabilities. It works instantly on any project — no indexing required to start.
 
 > **🔥 NEW in v0.7.0**: Graph-enhanced search with dependency analysis! 7 new tools for intelligent code understanding: dependency traversal, module clustering, specialized searches. [See changelog →](CHANGELOG.md#070---2026-02-17--graph-enhanced-search--intelligence)  
-> **🚀 v0.6.1**: Critical performance fix eliminates 10-minute hangs! [Read more →](PERFORMANCE_FIX.md)
+> **🚀 v0.6.1**: Critical performance fix eliminates 10-minute hangs! [Read more →](docs/guides/performance.md)
 
 ## Features
 
@@ -77,7 +77,7 @@ ProjectMind is a standalone MCP server that gives AI coding assistants **persist
   - Enhanced Unicode handling (multi-encoding support)
   - Atomic file operations (crash-safe)
   - Memory-limited indexing (OOM prevention)
-  - Comprehensive test coverage (131 unit tests, 100% pass rate)
+  - Comprehensive test coverage (132 unit tests, 100% pass rate)
 - **Input Validation**: All tools have parameter validation and error handling
 - **Memory Management**: Clear memory, delete specific sections, maintain templates
 - **Index Statistics**: Track the number of indexed chunks
@@ -91,7 +91,7 @@ ProjectMind is a standalone MCP server that gives AI coding assistants **persist
 - 📖 **[Complete API Reference](docs/api/tools-reference.md)** - All 36 tools with examples
 - 💡 **[Advanced Usage Guide](docs/guides/advanced-usage.md)** - Power features and workflows
 - 🔥 **[Changelog v0.7.0](CHANGELOG.md)** - Graph-enhanced search & 7 new tools
-- ⚡ **[Performance Fix Guide](PERFORMANCE_FIX.md)** - Critical v0.6.1 performance improvements
+- ⚡ **[Performance Fix Guide](docs/guides/performance.md)** - Critical v0.6.1 performance improvements
 - 📁 **[Full Documentation](docs/)** - Complete documentation index
 
 ## Installation
@@ -845,10 +845,13 @@ Edit `config.py` to customize:
 
 ```bash
 # Run all tests
-python test_mcp_tools.py
+pytest tests/
 
-# Run search test
-python test_search.py
+# Run a specific test file
+pytest tests/test_mcp_tools.py
+
+# Run with coverage
+pytest tests/ --cov
 ```
 
 ### Pre-commit Hooks
@@ -939,7 +942,7 @@ Ensure you're in a git repository. The tool searches parent directories automati
 2. Install development dependencies: `pip install -e ".[dev]"`
 3. Install pre-commit hooks: `pre-commit install`
 4. Make your changes
-5. Run tests: `python test_mcp_tools.py`
+5. Run tests: `pytest tests/`
 6. Submit a pull request
 
 ## License
