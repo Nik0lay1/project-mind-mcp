@@ -1217,9 +1217,9 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
         from code_intelligence import get_dependencies_with_depth as _get_deps
 
         if main_results and main_results.get("metadatas"):
-            impl_files = [
-                m.get("source") for m in main_results["metadatas"][0] if m.get("source")
-            ][:3]
+            impl_files = [m.get("source") for m in main_results["metadatas"][0] if m.get("source")][
+                :3
+            ]
             graph = build_import_graph(config.PROJECT_ROOT)
 
             # Find files with no upstream dependencies (potential entry points)
