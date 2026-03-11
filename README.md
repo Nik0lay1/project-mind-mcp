@@ -51,6 +51,13 @@ Unlike naive text splitters that cut code in the middle of a function, ProjectMi
 - `explore_directory(path)` — browse project tree level by level
 - `get_file_summary(path)` — imports, classes, functions, git history
 
+### ⚡ Hybrid Search (BM25 + Vector)
+Two search engines combined via **Reciprocal Rank Fusion (RRF)**:
+- **BM25** catches exact keyword matches — finds `getUserById` when you type exactly that
+- **Vector search** catches semantic matches — finds auth code even if named differently
+- RRF merges both ranked lists for best-of-both-worlds results
+- Automatic fallback to pure vector search when BM25 index is not ready
+
 ### 🔄 Incremental Indexing
 Only re-indexes changed files — 10-100x faster than full re-indexing.
 
@@ -158,6 +165,8 @@ AI Assistant (Claude / Zencoder / Cursor)
 - ~130MB, runs fully locally on CPU
 - No API keys, no data sent anywhere
 
+**Search pipeline**: BM25 (keyword) + ChromaDB (semantic) → Reciprocal Rank Fusion → top-N results
+
 ---
 
 ## Requirements
@@ -194,7 +203,8 @@ Custom ignore patterns: create `.ai/.indexignore` (same syntax as `.gitignore`).
 ```
 mcp_server.py           ← all MCP tool definitions
 config.py               ← configuration
-vector_store_manager.py ← ChromaDB wrapper
+vector_store_manager.py ← ChromaDB wrapper + hybrid search
+bm25_index.py           ← BM25 keyword index + RRF fusion
 codebase_indexer.py     ← file scanning & AST-aware chunking
 ast_splitter.py         ← tree-sitter parser (9 languages)
 code_intelligence.py    ← import graph, complexity analysis

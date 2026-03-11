@@ -37,6 +37,7 @@ Memory__update_memory  ←  section: "Recent Decisions", content: "..."
 | `vector_store_manager.py` | ChromaDB wrapper + query cache |
 | `codebase_indexer.py` | File scanning + AST-aware chunking |
 | `ast_splitter.py` | tree-sitter parser (Python, JS, TS, TSX, Java, Go, Rust, Ruby) |
+| `bm25_index.py` | BM25 keyword index + Reciprocal Rank Fusion |
 | `run_index.py` | Helper script for manual full re-indexing |
 | `config.py` | All configuration (model, paths, extensions) |
 | `context.py` | Dependency injection (AppContext singleton) |
@@ -50,6 +51,8 @@ Memory__update_memory  ←  section: "Recent Decisions", content: "..."
 - **Chunk size**: 1500 chars / 150 overlap
 - **Chunking strategy**: AST-aware (tree-sitter) → falls back to text splitter for unsupported types
 - **Chunk metadata**: `symbol_type`, `symbol_name`, `class_name`, `line_start`, `line_end`
+- **Search strategy**: Hybrid — BM25 (keyword) + ChromaDB (semantic) merged via Reciprocal Rank Fusion
+- **BM25 index**: persisted at `.ai/bm25_index.pkl`, rebuilt automatically after every indexing run
 - **Vector store**: ChromaDB persistent at `.ai/vector_store/`
 - **Memory file**: `.ai/memory.md`
 
