@@ -31,6 +31,15 @@ Search your codebase by *meaning*, not just text. Powered by a local `sentence-t
 "find authentication middleware"  →  finds auth code even if it's named differently
 ```
 
+### 🌳 AST-Aware Chunking
+Unlike naive text splitters that cut code in the middle of a function, ProjectMind uses [tree-sitter](https://tree-sitter.github.io) to parse source files into **exact syntax units**:
+
+- Functions and methods are indexed as individual, self-contained chunks
+- Class methods get a `# Class: ClassName` context prefix for better search relevance
+- Rich metadata per chunk: `symbol_type`, `symbol_name`, `class_name`, `line_start`, `line_end`
+- Supports: **Python, JavaScript, TypeScript, TSX, Java, Go, Rust, Ruby**
+- Graceful fallback to text splitting for unsupported file types
+
 ### 🕸 Dependency Graph Intelligence
 - Traverse import relationships up to 5 levels deep
 - Find related files via shared dependency clustering
@@ -102,16 +111,11 @@ Memory__index_codebase
 
 Or run directly for large projects:
 ```bash
-cd /path/to/ProjectMindMCP
-.venv/Scripts/python.exe -c "
-import config, sys
-sys.argv = ['', '--project-root', '/path/to/your/project']
-from context import get_context
-from mcp_server import startup_check, load_index_ignore_patterns, get_ignored_dirs
-startup_check()
-ctx = get_context()
-print(ctx.indexer.index_all(config.PROJECT_ROOT, get_ignored_dirs(), load_index_ignore_patterns(), force=True))
-"
+# Windows
+.venv\Scripts\python.exe run_index.py
+
+# macOS/Linux
+.venv/bin/python run_index.py
 ```
 
 ---
@@ -191,11 +195,13 @@ Custom ignore patterns: create `.ai/.indexignore` (same syntax as `.gitignore`).
 mcp_server.py           ← all MCP tool definitions
 config.py               ← configuration
 vector_store_manager.py ← ChromaDB wrapper
-codebase_indexer.py     ← file scanning & chunking
+codebase_indexer.py     ← file scanning & AST-aware chunking
+ast_splitter.py         ← tree-sitter parser (9 languages)
 code_intelligence.py    ← import graph, complexity analysis
 memory_manager.py       ← persistent memory read/write
 incremental_indexing.py ← change tracking
 context.py              ← dependency injection
+run_index.py            ← helper script for manual re-indexing
 ```
 
 ---
