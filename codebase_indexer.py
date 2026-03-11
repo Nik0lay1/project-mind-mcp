@@ -241,7 +241,9 @@ class CodebaseIndexer:
         self.vector_store.rebuild_bm25()
 
         stats = indexer.get_stats()
-        warning = "" if total_files <= MAX_FILES_PER_INDEX else f" (limited from {total_files} files)"
+        warning = (
+            "" if total_files <= MAX_FILES_PER_INDEX else f" (limited from {total_files} files)"
+        )
         return f"Indexed {file_count} files ({stats['total_chunks']} chunks in {stats['total_batches']} batches){warning}."
 
     def index_changed(

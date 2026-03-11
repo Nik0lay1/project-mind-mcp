@@ -1520,11 +1520,7 @@ def index_codebase(force: bool = False, timeout: int = DEFAULT_INDEX_TIMEOUT) ->
 
     # Submit indexing work to thread pool with timeout
     future = _indexing_executor.submit(
-        ctx.indexer.index_all,
-        root_dir,
-        ignored_dirs,
-        ignore_patterns,
-        force
+        ctx.indexer.index_all, root_dir, ignored_dirs, ignore_patterns, force
     )
 
     try:
@@ -1947,10 +1943,7 @@ def index_changed_files(timeout: int = 120) -> str:
 
     # Submit indexing work to thread pool with timeout
     future = _indexing_executor.submit(
-        ctx.indexer.index_changed,
-        root_dir,
-        ignored_dirs,
-        ignore_patterns
+        ctx.indexer.index_changed, root_dir, ignored_dirs, ignore_patterns
     )
 
     try:
