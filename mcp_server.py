@@ -2038,58 +2038,81 @@ def auto_update_memory_from_commits(days: int = 7, auto_summarize: bool = True) 
 @mcp.tool()
 def analyze_code_complexity(target_path: str = ".") -> str:
     try:
-        from radon.complexity import cc_visit
-    except ImportError:
-        return "Error: radon not installed. Run: pip install radon"
-
-    try:
         target = validate_path(target_path)
         if not target.exists():
             return f"Path not found: {target_path}"
 
-        results = []
-        results.append("# CODE COMPLEXITY ANALYSIS\n")
+        from code_intelligence import _LANGUAGE_MAP, compute_file_complexity_ast
 
-        py_files = list(target.rglob("*.py"))
-        py_files = [
+        results = ["# CODE COMPLEXITY ANALYSIS\n"]
+        high_complexity: list[tuple[str, str, int]] = []
+        total_complexity = 0
+        total_functions = 0
+        file_count = 0
+        lang_counts: dict[str, int] = {}
+
+        supported_exts = set(_LANGUAGE_MAP.keys())
+        all_files = [
             f
-            for f in py_files
-            if not any(is_dir_ignored(p) for p in f.relative_to(target).parts[:-1])
+            for f in target.rglob("*")
+            if f.is_file()
+            and f.suffix.lower() in supported_exts
+            and not any(is_dir_ignored(p) for p in f.relative_to(target).parts[:-1])
         ]
 
-        if not py_files:
-            return "No Python files found"
+        if not all_files:
+            return "No supported files found (Python, JS, TS, Java, Go, Rust, Ruby)"
 
-        high_complexity = []
-        total_complexity = 0
-        file_count = 0
+        for src_file in all_files[:100]:
+            lang = _LANGUAGE_MAP.get(src_file.suffix.lower(), "unknown")
 
-        for py_file in py_files[:50]:
-            try:
-                code = py_file.read_text(encoding="utf-8")
+            if lang == "python":
+                try:
+                    from radon.complexity import cc_visit
 
-                complexity_results = cc_visit(code)
-                if complexity_results:
-                    for item in complexity_results:
-                        if item.complexity > 10:
-                            high_complexity.append((str(py_file), item.name, item.complexity))
-                        total_complexity += item.complexity
+                    code = src_file.read_text(encoding="utf-8", errors="replace")
+                    cc_results = cc_visit(code)
+                    if cc_results:
+                        for item in cc_results:
+                            if item.complexity > 10:
+                                high_complexity.append((str(src_file), item.name, item.complexity))
+                            total_complexity += item.complexity
+                            total_functions += 1
+                        file_count += 1
+                        lang_counts[lang] = lang_counts.get(lang, 0) + 1
+                    continue
+                except (ImportError, Exception):
+                    pass
 
+            funcs = compute_file_complexity_ast(src_file)
+            if funcs:
+                for name, _line, complexity in funcs:
+                    if complexity > 10:
+                        high_complexity.append((str(src_file), name, complexity))
+                    total_complexity += complexity
+                    total_functions += 1
                 file_count += 1
-            except Exception:
-                continue
+                lang_counts[lang] = lang_counts.get(lang, 0) + 1
+
+        if not file_count:
+            return "No functions found to analyze"
 
         if high_complexity:
             results.append("## High Complexity Functions (>10)")
             high_complexity.sort(key=lambda x: x[2], reverse=True)
             for file, name, complexity in high_complexity[:20]:
-                results.append(f"- `{file}:{name}` - Complexity: {complexity}")
+                results.append(f"- `{file}:{name}` — Complexity: {complexity}")
+            results.append("")
 
-        avg_complexity = total_complexity / file_count if file_count > 0 else 0
-        results.append("\n## Summary")
+        avg = total_complexity / total_functions if total_functions else 0
+        results.append("## Summary")
         results.append(f"- Files analyzed: {file_count}")
-        results.append(f"- High complexity functions: {len(high_complexity)}")
-        results.append(f"- Average complexity: {avg_complexity:.2f}")
+        results.append(f"- Functions analyzed: {total_functions}")
+        results.append(f"- High complexity (>10): {len(high_complexity)}")
+        results.append(f"- Average complexity: {avg:.2f}")
+        results.append(
+            f"- By language: {', '.join(f'{lang}: {cnt}' for lang, cnt in sorted(lang_counts.items()))}"
+        )
 
         return "\n".join(results)
     except ValueError as e:

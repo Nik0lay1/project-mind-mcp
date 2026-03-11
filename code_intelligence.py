@@ -6,6 +6,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from config import (
     BINARY_EXTENSIONS,
@@ -1085,3 +1086,175 @@ def analyze_change_impact(file_path: str, root: Path) -> str:
         lines.append("\n*This file has wide impact. Consider thorough testing and careful review.*")
 
     return "\n".join(lines)
+
+
+_LANGUAGE_MAP: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".java": "java",
+    ".go": "go",
+    ".rs": "rust",
+    ".rb": "ruby",
+}
+
+_BRANCH_NODES: dict[str, set[str]] = {
+    "python": {
+        "if_statement",
+        "elif_clause",
+        "for_statement",
+        "while_statement",
+        "except_clause",
+        "conditional_expression",
+        "boolean_operator",
+        "with_statement",
+    },
+    "javascript": {
+        "if_statement",
+        "for_statement",
+        "for_in_statement",
+        "for_of_statement",
+        "while_statement",
+        "do_statement",
+        "switch_case",
+        "catch_clause",
+        "conditional_expression",
+    },
+    "typescript": {
+        "if_statement",
+        "for_statement",
+        "for_in_statement",
+        "for_of_statement",
+        "while_statement",
+        "do_statement",
+        "switch_case",
+        "catch_clause",
+        "conditional_expression",
+    },
+    "tsx": {
+        "if_statement",
+        "for_statement",
+        "for_in_statement",
+        "for_of_statement",
+        "while_statement",
+        "do_statement",
+        "switch_case",
+        "catch_clause",
+        "conditional_expression",
+    },
+    "java": {
+        "if_statement",
+        "for_statement",
+        "enhanced_for_statement",
+        "while_statement",
+        "do_statement",
+        "catch_clause",
+        "conditional_expression",
+        "switch_label",
+    },
+    "go": {
+        "if_statement",
+        "for_statement",
+        "type_switch_statement",
+        "select_statement",
+        "expression_case",
+        "type_case",
+    },
+    "rust": {
+        "if_expression",
+        "for_expression",
+        "while_expression",
+        "loop_expression",
+        "match_arm",
+        "if_let_expression",
+        "while_let_expression",
+    },
+    "ruby": {"if", "elsif", "unless", "for", "while", "until", "rescue", "when"},
+}
+
+_FUNCTION_NODES: dict[str, set[str]] = {
+    "python": {"function_definition"},
+    "javascript": {
+        "function_declaration",
+        "function_expression",
+        "arrow_function",
+        "method_definition",
+    },
+    "typescript": {
+        "function_declaration",
+        "function_expression",
+        "arrow_function",
+        "method_definition",
+        "method_signature",
+    },
+    "tsx": {"function_declaration", "function_expression", "arrow_function", "method_definition"},
+    "java": {"method_declaration", "constructor_declaration"},
+    "go": {"function_declaration", "method_declaration"},
+    "rust": {"function_item"},
+    "ruby": {"method"},
+}
+
+
+def _count_branches(node: Any, branch_types: set[str]) -> int:
+    count = 0
+    if node.type in branch_types:
+        count += 1
+    for child in node.children:
+        count += _count_branches(child, branch_types)
+    return count
+
+
+def _get_func_name(node: Any, source: bytes) -> str:
+    for child in node.children:
+        if child.type in ("identifier", "name", "property_identifier"):
+            return child.text.decode("utf-8", errors="replace")
+    first = source[node.start_byte : node.start_byte + 60].decode("utf-8", errors="replace")
+    return first.split("\n")[0].strip()[:40]
+
+
+def compute_file_complexity_ast(
+    file_path: Path,
+) -> list[tuple[str, int, int]]:
+    """
+    Computes cyclomatic complexity for each function/method in a file using tree-sitter.
+
+    Returns:
+        List of (function_name, line_start, complexity) sorted by complexity descending.
+        Returns empty list if language not supported or parse fails.
+    """
+    language = _LANGUAGE_MAP.get(file_path.suffix.lower())
+    if not language:
+        return []
+
+    try:
+        from ast_splitter import _get_parser
+
+        parser = _get_parser(language)
+        if not parser:
+            return []
+
+        source = file_path.read_bytes()
+        tree = parser.parse(source)
+        root = tree.root_node
+
+        func_types = _FUNCTION_NODES.get(language, set())
+        branch_types = _BRANCH_NODES.get(language, set())
+        results: list[tuple[str, int, int]] = []
+
+        def walk(node: Any) -> None:
+            if node.type in func_types:
+                name = _get_func_name(node, source)
+                complexity = 1 + _count_branches(node, branch_types)
+                results.append((name, node.start_point[0] + 1, complexity))
+            else:
+                for child in node.children:
+                    walk(child)
+
+        walk(root)
+        return sorted(results, key=lambda x: x[2], reverse=True)
+
+    except Exception as e:
+        logger.debug(f"AST complexity failed for {file_path}: {e}")
+        return []
