@@ -88,10 +88,10 @@ def reconfigure(new_root: Path) -> None:
     LOG_FILE = AI_DIR / "projectmind.log"
 
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "flax-sentence-embeddings/st-codesearch-distilroberta-base"
 
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 100
+CHUNK_SIZE = 1500
+CHUNK_OVERLAP = 150
 BATCH_SIZE = 100
 MAX_FILE_SIZE_MB = 10
 MAX_MEMORY_MB = 100

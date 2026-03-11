@@ -1,950 +1,221 @@
-# ProjectMind: Local Context & Memory MCP Server
+# ProjectMind MCP
 
-ProjectMind is a standalone MCP server that gives AI coding assistants **persistent memory**, **progressive project exploration**, **graph-enhanced search**, and **local vector search** capabilities. It works instantly on any project — no indexing required to start.
+> Give your AI coding assistant a brain. Persistent memory, semantic code search, and project intelligence — all running locally with no API keys required.
 
-> **🔥 NEW in v0.7.0**: Graph-enhanced search with dependency analysis! 7 new tools for intelligent code understanding: dependency traversal, module clustering, specialized searches. [See changelog →](CHANGELOG.md#070---2026-02-17--graph-enhanced-search--intelligence)  
-> **🚀 v0.6.1**: Critical performance fix eliminates 10-minute hangs! [Read more →](docs/guides/performance.md)
+**ProjectMind** is an open-source [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that supercharges AI assistants like Claude, Zencoder, and Cursor with long-term project memory and intelligent codebase search.
+
+> 🤖 **This project was built with AI** — designed, coded, debugged, and documented using AI-assisted development from day one.
+
+---
+
+## Why ProjectMind?
+
+Every time you start a new AI session, your assistant forgets everything about your project. ProjectMind solves this:
+
+- **No more re-explaining** your architecture every session
+- **Semantic code search** that understands *what* code does, not just *what* it's named
+- **Dependency graph analysis** to understand how modules connect
+- **Works 100% locally** — your code never leaves your machine
+
+---
 
 ## Features
 
-### 🔥 Graph-Enhanced Intelligence (NEW in v0.7.0)
-- **Dependency Graph Analysis**: Traverse import relationships up to 5 levels deep
-- **Module Clustering**: Find related files using Jaccard similarity on shared dependencies
-- **Dependency Path Finding**: Discover how modules are connected through imports
-- **Hybrid Search**: Combine semantic search with structural dependencies
-- **Specialized Searches**: Purpose-built tools for debugging, features, and architecture
+### 🧠 Persistent Project Memory
+Save architectural decisions, tech stack notes, and context that survives across sessions. The AI reads this at the start of every conversation.
 
-### Core Features
-- **Self-Initialization**: Automatically sets up `.ai/` directory and `.gitignore`
-- **Project Memory**: Persistent memory file (`.ai/memory.md`) readable via `project://memory`
-- **Context Management**: Tools to update, clear, and delete memory sections
-- **Git Integration**: Ingest git commit history into project memory to track development flow
-- **Local RAG**: Index your codebase and search it using local embeddings
+### 🔍 Semantic Code Search
+Search your codebase by *meaning*, not just text. Powered by a local `sentence-transformers` model — no OpenAI key needed.
 
-### Progressive Exploration (NEW in v0.6.0)
-- **🔥 Instant Project Overview**: `get_project_overview()` — tech stack, git info, memory context, file stats in < 1 second
-- **🔥 Drill-Down Navigation**: `explore_directory(path)` — browse project tree level by level with git change markers
-- **🔥 Smart File Summaries**: `get_file_summary(path)` — imports, classes, functions, git history, memory mentions
-- **No indexing required** — all three tools work instantly without ChromaDB or embeddings
-- **Context-aware** — every response enriched with data from memory and git history
+```
+"find authentication middleware"  →  finds auth code even if it's named differently
+```
 
-### Advanced Features
-- **Smart Indexing**: 
-  - **Incremental indexing** - Only re-index changed files (10-100x faster)
-  - Filters binary and non-text files automatically
-  - Configurable file size limits (default 10MB)
-  - Custom ignore patterns via `.ai/.indexignore`
-  - Supports 50+ programming languages and text formats
-- **Advanced Search Filters**:
-  - Filter by file types
-  - Exclude directories
-  - Minimum relevance threshold
-  - Relevance scores in results
-- **Automatic Memory Updates**:
-  - Auto-summarize recent commits
-  - Scheduled memory updates
-  - Smart grouping by contributors
-- **Code Quality & Metrics**:
-  - Cyclomatic complexity analysis
-  - Pylint quality checks
-  - Test coverage tracking
-  - Technical debt detection
-- **Memory Versioning**:
-  - Git-like versioning for memory
-  - Timestamped snapshots
-  - Easy rollback and restore
-  - Version history tracking
-- **Performance Caching & Optimization** (v0.4.0+, v0.6.1):
-  - **🔥 NEW (v0.6.1)**: Memory operations bypass VectorStore initialization (>1000x faster)
-  - **🔥 NEW (v0.6.1)**: Zero blocking on parallel tool calls
-  - Multi-layer caching system (LRU, TTL, File caches)
-  - Intelligent project auto-detection (no manual config!)
-  - Memory pagination to prevent context window exhaustion
-  - Lazy vector store initialization (30-60s faster startup)
-  - Structure analysis caching (5-minute TTL)
-  - Optimized file system traversal (3x faster on large projects)
-  - Reduced disk I/O for file operations
-  - 5-minute query result caching
-  - Performance monitoring via `get_cache_stats()`
-  - Thread-safe implementations
-- **Production-Ready Architecture** (v0.5.0):
-  - **Dependency Injection** - `AppContext` replaces global singletons for better testability
-  - **Custom Exception Hierarchy** - Domain-specific exceptions for better error handling
-  - **Git Utilities Module** - Reusable git operations eliminating code duplication
-  - **Structured Logging** - Enhanced logging with JSON context fields
-  - Zero global state - full class-based design
-  - Path validation security (directory traversal prevention)
-  - Enhanced Unicode handling (multi-encoding support)
-  - Atomic file operations (crash-safe)
-  - Memory-limited indexing (OOM prevention)
-  - Comprehensive test coverage (132 unit tests, 100% pass rate)
-- **Input Validation**: All tools have parameter validation and error handling
-- **Memory Management**: Clear memory, delete specific sections, maintain templates
-- **Index Statistics**: Track the number of indexed chunks
-- **Type Safety**: Full type hints throughout the codebase
-- **Environment Configuration**: Customize via environment variables
+### 🕸 Dependency Graph Intelligence
+- Traverse import relationships up to 5 levels deep
+- Find related files via shared dependency clustering
+- Discover the shortest path between any two modules
+- Identify entry points and orphaned modules
 
-## 📚 Documentation
+### ⚡ Instant Project Exploration (no indexing needed)
+- `get_project_overview()` — tech stack, git info, file stats in < 1 second
+- `explore_directory(path)` — browse project tree level by level
+- `get_file_summary(path)` — imports, classes, functions, git history
 
-**Quick Links:**
-- 🚀 **[Getting Started Guide](docs/guides/getting-started.md)** - Installation, setup, first steps
-- 📖 **[Complete API Reference](docs/api/tools-reference.md)** - All 36 tools with examples
-- 💡 **[Advanced Usage Guide](docs/guides/advanced-usage.md)** - Power features and workflows
-- 🔥 **[Changelog v0.7.0](CHANGELOG.md)** - Graph-enhanced search & 7 new tools
-- ⚡ **[Performance Fix Guide](docs/guides/performance.md)** - Critical v0.6.1 performance improvements
-- 📁 **[Full Documentation](docs/)** - Complete documentation index
+### 🔄 Incremental Indexing
+Only re-indexes changed files — 10-100x faster than full re-indexing.
 
-## Installation
+### 📊 Code Quality Metrics
+Cyclomatic complexity, pylint scores, test coverage tracking — all queryable via MCP tools.
 
-### Prerequisites
-- Python 3.10+
-- `uv` (recommended) or `pip`
+---
 
-### Using `uv` (Recommended)
+## Quick Start
 
-1. Clone or copy the server files to your project or a central location
-2. Run the server directly:
+### 1. Clone and install
 
 ```bash
-uv run mcp_server.py
+git clone https://github.com/Nik0lay1/ProjectMindMCP.git
+cd ProjectMindMCP
+python -m venv .venv
+
+# Windows
+.venv\Scripts\pip install -e .
+
+# macOS/Linux
+.venv/bin/pip install -e .
 ```
 
-### Using `pip`
+### 2. Add to your MCP client
 
-1. Install dependencies:
+**Zencoder / Claude Desktop** — add to `mcp.json`:
 
-```bash
-pip install -e .
-# or for development
-pip install -e ".[dev]"
-```
-
-2. Run the server:
-
-```bash
-python mcp_server.py
-```
-
-## IDE Configuration
-
-### Zencoder.ai
-
-Add ProjectMind as a custom MCP server in Zencoder's Tools settings.
-
-**✨ NEW (v0.5.4)**: The server now **automatically detects** your project! No need to set `cwd` manually.
-
-#### Global Installation (Recommended)
-
-Install ProjectMind once and use it with **any project**:
-
-```json
-{
-  "type": "stdio",
-  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
-  "args": ["f:/path/to/projectmind/mcp_server.py"]
-}
-```
-
-The server will automatically find your project by searching for markers like `.git`, `package.json`, `pyproject.toml`, etc.
-
-#### Configuration Examples
-
-**Windows Example:**
-```json
-{
-  "type": "stdio",
-  "command": "f:/Tools/ProjectMind/.venv/Scripts/python.exe",
-  "args": ["f:/Tools/ProjectMind/mcp_server.py"]
-}
-```
-
-**macOS/Linux Example:**
-```json
-{
-  "type": "stdio",
-  "command": "/opt/projectmind/.venv/bin/python",
-  "args": ["/opt/projectmind/mcp_server.py"]
-}
-```
-
-#### Manual Project Path (Optional)
-
-If auto-detection doesn't work, you can specify the project path:
-
-```json
-{
-  "type": "stdio",
-  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
-  "args": [
-    "f:/path/to/projectmind/mcp_server.py",
-    "--project-root",
-    "${workspaceFolder}"
-  ]
-}
-```
-
-Or set environment variable:
-```json
-{
-  "type": "stdio",
-  "command": "f:/path/to/projectmind/.venv/Scripts/python.exe",
-  "args": ["f:/path/to/projectmind/mcp_server.py"],
-  "env": {
-    "PROJECT_ROOT": "${workspaceFolder}"
-  }
-}
-```
-
-### Claude Desktop / Cursor / VS Code
-
-To use ProjectMind with other IDEs, add it to your MCP config.
-
-**✨ NEW (v0.5.4)**: Project detection is now automatic! Just point to the server.
-
-**Example config.json:**
 ```json
 {
   "mcpServers": {
-    "projectmind": {
-      "command": "/opt/projectmind/.venv/bin/python",
-      "args": ["/opt/projectmind/mcp_server.py"]
+    "Memory": {
+      "command": "/path/to/ProjectMindMCP/.venv/bin/python",
+      "args": ["/path/to/ProjectMindMCP/mcp_server.py"]
     }
   }
 }
 ```
 
-The server will automatically detect your project. If needed, you can manually specify:
+**Windows example:**
 ```json
 {
   "mcpServers": {
-    "projectmind": {
-      "command": "/opt/projectmind/.venv/bin/python",
-      "args": ["/opt/projectmind/mcp_server.py", "--project-root", "/path/to/project"]
+    "Memory": {
+      "command": "F:\\Projects\\ProjectMindMCP\\.venv\\Scripts\\python.exe",
+      "args": ["F:\\Projects\\ProjectMindMCP\\mcp_server.py"]
     }
   }
 }
 ```
 
-## Available Tools
+### 3. Index your project
 
-### Progressive Exploration (Start Here!)
-
-These tools work **instantly** without indexing or vector store initialization. Use them to understand any project before diving into code.
-
-#### `get_project_overview()`
-Returns a comprehensive project overview combining file system, memory, and git data:
-- Project name, root path, active git branch, total commits
-- Tech stack (detected from config files + memory)
-- Project status and recent decisions (from memory)
-- Root directories and file type statistics
-- Recent git activity (last 7 days)
-
-**Use case:** First thing to call when opening a new or unfamiliar project.
-
+In your target project, ask the AI:
 ```
-# PROJECT OVERVIEW: my-app
-
-**Root**: `/home/user/my-app`
-**Git**: branch `main`, 142+ commits
-**Tech**: Node.js, Docker
-
-## Tech Stack (from memory)
-- Language: TypeScript
-- Framework: Next.js 14
-
-## Recent Activity (last 7 days)
-- 2026-02-14 [a1b2c3d]: fix: resolve auth race condition
-- 2026-02-13 [e4f5g6h]: feat: add payment webhook
-
-## Recent Decisions (from memory)
-- Switched from JWT to session-based auth
+Memory__index_codebase
 ```
 
-#### `explore_directory(path=".", depth=1, max_items=100)`
-Browse the project tree level by level with git context:
-- `path`: Directory path relative to project root (use `"."` for root)
-- `depth`: How many levels deep (1-3, default 1)
-- `max_items`: Maximum items to show (1-500, default 100)
-- Files changed in the last 14 days are annotated with the commit message
-- Memory mentions for the directory are shown at the bottom
-
-**Use case:** Navigate project structure and spot recently changed areas.
-
-```
-# src/
-
-controllers/
-  authController.ts  (4.2KB)  [changed 2026-02-14: fix auth race condition]
-  userController.ts  (3.1KB)
-models/
-utils/
-  logger.ts  (1.2KB)  [changed 2026-02-13: add structured logging]
-
-## Notes from memory
-- Refactored src to use hexagonal architecture
+Or run directly for large projects:
+```bash
+cd /path/to/ProjectMindMCP
+.venv/Scripts/python.exe -c "
+import config, sys
+sys.argv = ['', '--project-root', '/path/to/your/project']
+from context import get_context
+from mcp_server import startup_check, load_index_ignore_patterns, get_ignored_dirs
+startup_check()
+ctx = get_context()
+print(ctx.indexer.index_all(config.PROJECT_ROOT, get_ignored_dirs(), load_index_ignore_patterns(), force=True))
+"
 ```
 
-#### `get_file_summary(path, max_lines=50)`
-Get a detailed file summary with code structure, git history, and memory context:
-- `path`: File path relative to project root
-- `max_lines`: Lines of code preview to include (0-500, default 50)
-- Shows imports, classes, functions (Python, JS/TS)
-- Git history: last 5 commits that touched this file
-- Memory mentions: any notes about this file from project memory
+---
 
-**Use case:** Understand a file before editing it.
+## Available Tools (40+)
 
-```
-# authController.ts
+| Category | Tools |
+|---|---|
+| **Memory** | `read_memory`, `update_memory`, `clear_memory`, `save_memory_version` |
+| **Search** | `search_codebase`, `search_for_feature`, `search_architecture`, `search_for_errors` |
+| **Exploration** | `get_project_overview`, `explore_directory`, `get_file_summary` |
+| **Dependencies** | `get_file_relations`, `get_dependencies_with_depth`, `get_module_cluster`, `find_dependency_path` |
+| **Indexing** | `index_codebase`, `index_changed_files`, `get_index_stats` |
+| **Git** | `ingest_git_history`, `get_recent_changes_summary`, `auto_update_memory_from_commits` |
+| **Quality** | `analyze_code_complexity`, `analyze_code_quality`, `get_test_coverage_info` |
+| **Project** | `set_project_root`, `detect_project_conventions`, `generate_project_summary` |
 
-**Path**: `src/controllers/authController.ts`
-**Size**: 4.2 KB
-**Last changed**: 2026-02-14 15:30 by John
-**Total changes**: 12+ commits
+Full reference: [docs/api/tools-reference.md](docs/api/tools-reference.md)
 
-**Imports** (5):
-  - `import { Request, Response } from 'express'`
-  - `import { AuthService } from '../services/auth'`
+---
 
-**Exports** (3):
-  - `export async function login(req: Request, res: Response)`
-
-## Git History
-- 2026-02-14 15:30 [a1b2c3d] fix: resolve auth race condition (John)
-- 2026-02-10 09:15 [x7y8z9a] refactor: extract auth middleware (John)
-
-## Notes from memory
-- Switched from JWT to session-based auth in authController
-```
-
-### Memory Management
-
-> **⚡ Performance Note (v0.6.1)**: All memory operations are now instant (<10ms) and never block on VectorStore initialization. Safe to call in parallel with any other tools.
-
-#### `read_memory(max_lines: int | None = 100)`
-Returns the current state of the project memory instantly.
-
-**Parameters:**
-- `max_lines`: Maximum number of lines to return (default: 100)
-  - Use lower values (50-200) for quick summaries
-  - Use `None` for full content
-  - Prevents overwhelming context windows with large memory files
-
-**Example:**
-```python
-# Quick summary (first 100 lines)
-read_memory()
-
-# First 50 lines
-read_memory(max_lines=50)
-
-# Full content (may be large!)
-read_memory(max_lines=None)
-```
-
-#### `update_memory(content: str, section: str = "Recent Decisions")`
-Appends information to the project memory file under specified section.
-
-#### `clear_memory(keep_template: bool = True)`
-Clears the memory file. If `keep_template=True`, preserves the basic structure.
-
-#### `delete_memory_section(section_name: str)`
-Deletes a specific section from the memory file.
-
-### Graph-Enhanced Search (NEW in v0.7.0)
-
-#### `search_with_dependencies(query, n_results=5, include_deps=True, depth=1)`
-Hybrid search combining semantic similarity with dependency graph.
-- Finds semantically similar code
-- Optionally includes dependencies of matching files
-- Provides complete context for understanding
-- Depth control for dependency inclusion (1-3 levels)
-
-#### `get_dependencies_with_depth(file_path, depth=2, direction="downstream")`
-Traverse dependency graph from a file.
-- `direction`: "downstream" (imports) or "upstream" (importers)
-- `depth`: How many levels deep (1-5)
-- Shows distance from origin file
-- Useful for impact analysis and refactoring
-
-#### `find_dependency_path(from_file, to_file, max_depth=10)`
-Find shortest import chain between two files.
-- Discover how modules are connected
-- Useful for understanding architecture
-- Shows step-by-step dependency path
-
-#### `get_module_cluster(file_path, similarity_threshold=0.3, max_cluster_size=20)`
-Find files related to target based on shared dependencies.
-- Uses Jaccard similarity
-- Identifies modules that work together
-- Configurable similarity threshold (0.0-1.0)
-
-### Specialized Search Tools (NEW in v0.7.0)
-
-#### `search_for_errors(error_text, stacktrace="", n_results=5)`
-Debug-focused search for error messages.
-- Searches error handlers, tests, similar patterns
-- Includes recent git commits mentioning error
-- Organized output for debugging
-
-#### `search_for_feature(feature_name, n_results=10)`
-Understand feature implementation.
-- Finds implementations, configs, tests
-- Identifies entry points
-- Shows feature structure
-
-#### `search_architecture(component, n_results=10)`
-Architectural analysis of components.
-- Finds core modules and dependencies
-- Shows module clustering
-- Helps understand system design
-
-### Codebase Indexing & Search
-
-#### `index_codebase(force: bool = False)`
-Indexes the codebase for vector search.
-- `force`: If true, clears existing index and rebuilds it
-- Respects `.ai/.indexignore` patterns
-- Automatically filters binary files and large files
-
-#### `search_codebase(query: str, n_results: int = 5)`
-Searches the codebase using vector similarity with enhanced metadata.
-- `query`: Search query (required, non-empty)
-- `n_results`: Number of results (1-50, default 5)
-- **NEW**: Includes confidence scores, coverage indicators, relevance scores
-- **NEW**: Smart suggestions based on result quality
-
-#### `get_index_stats()`
-Returns statistics about the current vector store (number of chunks).
-
-**Performance Note:** This operation is very fast and doesn't trigger vector store initialization.
-
-#### `index_changed_files()` 🆕
-**Incremental indexing** - only indexes files that changed since last index.
-- 10-100x faster for large codebases
-- Tracks file modification times
-- Automatically removes deleted files from index
-
-**Use case:** Daily re-indexing, continuous development workflow.
-
-#### `search_codebase_advanced(query, n_results=5, file_types=None, exclude_dirs=None, min_relevance=0.0)` 🆕
-Advanced search with filters:
-- `file_types`: List of extensions (e.g., `[".py", ".js"]`)
-- `exclude_dirs`: Directories to skip (e.g., `["tests/", "docs/"]`)
-- `min_relevance`: Minimum relevance score (0-1)
-
-**Use case:** Precise search in specific parts of codebase.
-
-```python
-# Search only in Python files, exclude tests
-search_codebase_advanced(
-    "authentication",
-    file_types=[".py"],
-    exclude_dirs=["tests/"],
-    min_relevance=0.5
-)
-```
-
-### Project Analysis & Intelligence
-
-#### `generate_project_summary()`
-Generates comprehensive project summary including:
-- Current memory state
-- Recent git activity (last 5 commits)
-- Codebase statistics
-- Index stats
-
-**Use case:** Quick project overview for onboarding or context refresh.
-
-#### `extract_tech_stack()`
-Automatically extracts technology stack from:
-- `pyproject.toml` / `requirements.txt` (Python)
-- `package.json` (JavaScript/Node.js)
-- `Cargo.toml` (Rust)
-- `go.mod` (Go)
-
-**Use case:** Understand project dependencies without reading config files.
-
-#### `analyze_project_structure()`
-Analyzes and reports:
-- Main directories by size
-- File type distribution
-- Configuration files present
-
-**Use case:** Understand project organization and architecture.
-
-#### `get_recent_changes_summary(days: int = 7)`
-Provides summary of recent development activity:
-- Total commits in period
-- Contributors and their activity
-- Recent commit messages
-- `days`: Period to analyze (1-365, default 7)
-
-**Use case:** Catch up after being away from project.
-
-### Code Intelligence & Conventions 🆕 (v0.6.0)
-
-These tools provide deep code analysis without requiring ML or vector store initialization.
-
-#### `detect_project_conventions()`
-Auto-detects project conventions from codebase analysis:
-- **Naming style**: snake_case, camelCase, kebab-case detection
-- **Test framework**: pytest, jest, vitest, mocha auto-detection
-- **Test patterns**: test_*.py, *.spec.js, etc.
-- **Linting & formatting**: ruff, black, eslint, prettier
-- **Type checking**: mypy, TypeScript detection
-- **Frameworks**: React, Next.js, FastAPI, Django, etc.
-- **Error handling & logging patterns**
-- **Architecture**: monorepo, microservices, src/ structure
-
-**Use case:** Understand project conventions before making changes, onboard new developers.
+## How It Works
 
 ```
-# PROJECT CONVENTIONS
-
-**Primary Language**: Python
-**Frameworks**: FastAPI, SQLAlchemy
-**Architecture**: src/ directory, monorepo (packages/)
-
-## Naming & Style
-- **File naming**: snake_case (142/180 files)
-- **Formatting**: black, isort
-- **Linting**: ruff, pylint
-- **Type checking**: mypy
-
-## Testing
-- **Framework**: pytest
-- **Pattern**: test_*.py (in: tests/)
+Your Project
+     │
+     ▼
+ProjectMind MCP Server
+     │
+     ├── .ai/memory.md          ← persistent notes & decisions
+     ├── .ai/vector_store/      ← ChromaDB embeddings (local)
+     └── .ai/index_metadata.json ← tracks changed files
+     │
+     ▼
+AI Assistant (Claude / Zencoder / Cursor)
 ```
 
-#### `get_file_relations(path: str)`
-Shows import relationships and impact for a specific file:
-- **Imports from**: What this file imports (local files)
-- **Imported by**: What files depend on this file
-- **Related tests**: Test files for this module
-- **Impact assessment**: LOW/MEDIUM/HIGH based on dependents
+**Embedding model**: `flax-sentence-embeddings/st-codesearch-distilroberta-base`
+- Trained specifically on code (CodeSearchNet dataset)
+- ~130MB, runs fully locally on CPU
+- No API keys, no data sent anywhere
 
-**Use case:** Understand file dependencies before refactoring, find what breaks when you change a file.
+---
 
-```
-# FILE RELATIONS: src/auth/service.py
+## Requirements
 
-## Imports From (3)
-- `src/auth/models.py`
-- `src/database/session.py`
-- `src/utils/crypto.py`
+- Python 3.10 – 3.12
+- ~500MB disk (model + dependencies)
+- Works on Windows, macOS, Linux
 
-## Imported By (5)
-- `src/api/auth_routes.py`
-- `src/api/user_routes.py`
-- `src/background/tasks.py`
-
-## Related Tests (2)
-- `tests/auth/test_service.py`
-- `tests/integration/test_auth_flow.py`
-
-**Impact**: MEDIUM — 5 files depend on this module
-```
-
-#### `find_todos(tag: str | None = None)`
-Scans codebase for TODO, FIXME, HACK, BUG, XXX comments:
-- `tag`: Optional filter ("TODO", "FIXME", etc.) - default: all tags
-- Shows file locations and line numbers
-- Grouped by tag type and file
-
-**Use case:** Track technical debt, find unfinished work, identify areas needing attention.
-
-```
-# CODEBASE TODOs (47 total)
-
-## Summary
-- **TODO**: 32
-- **FIXME**: 10
-- **HACK**: 5
-
-## By File (top 10)
-- `src/api/routes.py`: 8 items
-- `src/services/payment.py`: 5 items
-
-## All Items
-
-### `src/api/routes.py`
-- **TODO** (line 45): Add rate limiting to all endpoints
-- **FIXME** (line 120): Handle timeout errors properly
-```
-
-#### `check_dependencies()`
-Analyzes dependency health across multiple ecosystems:
-- **Python**: pyproject.toml, requirements.txt
-- **JavaScript/Node**: package.json
-- **Go**: go.mod
-- **Rust**: Cargo.toml
-
-Reports:
-- Total dependencies (production vs dev)
-- Version pinning strategy (pinned ==, ranged, unpinned)
-- Duplicates between dependency files
-- Lock file presence
-- Version constraint patterns (^, ~, exact)
-
-**Use case:** Audit dependencies, find version conflicts, ensure reproducible builds.
-
-```
-# DEPENDENCY HEALTH CHECK
-
-## Python Dependencies (pyproject.toml)
-**Total**: 15
-
-**Pinned** (==): 3
-**Ranged**: 10
-**Unpinned/loose**: 2
-
-**Duplicates found**: requests, pytest
-
-### All Dependencies
-- **fastapi** `>=0.100.0`
-- **pydantic** `>=2.0.0,<3.0.0`
-...
-
-## JavaScript/Node.js Dependencies (package.json)
-**Total**: 42 (28 prod, 14 dev)
-**Version strategy**: ^minor: 35, ~patch: 5, exact: 2
-**Lock file**: package-lock.json
-```
-
-#### `analyze_change_impact(path: str)`
-Predicts what breaks if you change a file:
-- **Direct dependents**: Files that directly import this file
-- **Transitive impact**: Full dependency chain (BFS traversal)
-- **Tests to run**: All related test files
-- **Risk assessment**: MINIMAL/LOW/MEDIUM/HIGH/CRITICAL
-
-**Use case:** Impact analysis before refactoring, identify test coverage gaps.
-
-```
-# CHANGE IMPACT ANALYSIS: `src/database/models.py`
-
-## Direct Dependents (8)
-- `src/api/user_routes.py`
-- `src/api/post_routes.py`
-- `src/services/user_service.py`
-
-## Transitive Impact (15 more)
-- `src/api/admin_routes.py`
-- `src/background/sync_task.py`
-
-## Tests to Run (6)
-- `tests/models/test_user.py`
-- `tests/api/test_user_routes.py`
-
-## Risk Assessment
-- **Impact level**: HIGH
-- **Total affected files**: 23
-- **Direct dependents**: 8
-- **Transitive dependents**: 15
-- **Related tests**: 6
-
-*This file has wide impact. Consider thorough testing and careful review.*
-```
-
-#### `save_conventions_to_memory()`
-Detects project conventions and automatically saves them to memory.md:
-- Runs `detect_project_conventions()` internally
-- Saves to "Project Conventions" section in memory
-- Persists conventions for future AI assistant context
-
-**Use case:** One-time setup to give AI persistent knowledge of your project's conventions.
-
-#### `project_onboarding()`
-One-command comprehensive project briefing:
-- Runs `get_project_overview()`
-- Detects and saves conventions
-- Analyzes dependencies
-- Scans for TODOs
-- Auto-saves key info to memory
-
-**Use case:** Complete onboarding for new team members or AI assistants in one command.
-
-### Git Integration
-
-#### `ingest_git_history(limit: int = 30)`
-Reads git commit history and appends new commits to memory.
-- `limit`: Number of recent commits to check (1-1000, default 30)
-
-#### `auto_update_memory_from_commits(days=7, auto_summarize=True)` 🆕
-Automatically updates memory with recent git activity:
-- Analyzes commits from last N days
-- Auto-summarizes if > 5 commits
-- Groups by contributors
-- Highlights key changes
-
-**Use case:** Automated weekly memory updates.
-
-### Code Quality & Metrics 🆕
-
-#### `analyze_code_complexity(target_path=".")`
-Analyzes code complexity using cyclomatic complexity:
-- Identifies high-complexity functions (>10)
-- Calculates average complexity
-- Supports Python files
-
-**Use case:** Find code that needs refactoring.
-
-#### `analyze_code_quality(target_path=".", max_files=10)`
-Runs pylint analysis on codebase:
-- Counts errors, warnings, refactoring suggestions
-- Convention issues
-- Quality score
-
-**Use case:** Code review, technical debt tracking.
-
-#### `get_test_coverage_info()`
-Reads test coverage reports:
-- Parses `.coverage` and `htmlcov/` data
-- Shows overall coverage percentage
-- Provides links to detailed reports
-
-**Use case:** Monitor test coverage trends.
-
-### Memory Versioning 🆕
-
-#### `save_memory_version(description="")`
-Creates a versioned backup of memory:
-- Timestamped snapshots
-- Optional description
-- Stored in `.ai/memory_history/`
-
-**Use case:** Before major changes, milestone backups.
-
-#### `list_memory_versions()`
-Lists all saved memory versions with timestamps and descriptions.
-
-#### `restore_memory_version(timestamp)`
-Restores memory from a specific version:
-- Auto-backs up current memory before restore
-- Specify timestamp from list
-
-**Use case:** Rollback after mistakes, recover old context.
-
-```python
-# Save before major refactoring
-save_memory_version("Before microservices migration")
-
-# List versions
-list_memory_versions()
-
-# Restore if needed
-restore_memory_version("20241216_143022")
-```
-
-### Performance Monitoring 🆕 (v0.4.0)
-
-#### `get_cache_stats()`
-Returns performance statistics for all caches:
-- **File Cache** - Hit rate for file read operations
-- **Query Cache** - Hit rate for vector search results
-- Detailed metrics: hits, misses, size, capacity
-- TTL and expiration tracking for query cache
-
-**Use case:** Monitor caching effectiveness, optimize performance.
-
-```python
-# Check cache performance
-get_cache_stats()
-
-# Output:
-# File Cache (safe_read_text)
-# - Hits: 150
-# - Misses: 50
-# - Hit Rate: 75.00%
-# - Size: 42/50
-#
-# Query Cache (vector search)
-# - Hits: 80
-# - Misses: 20
-# - Hit Rate: 80.00%
-# - Size: 15/100
-# - Expirations: 5
-# - TTL: 300s
-```
-
-## Quick Start Examples
-
-### New to the project? (Recommended flow)
-```python
-# 1. Get instant overview (< 1 sec, no indexing needed)
-get_project_overview()
-
-# 2. Explore the main directories
-explore_directory("src", depth=2)
-
-# 3. Understand a specific file
-get_file_summary("src/controllers/authController.ts")
-
-# 4. (Optional) Index for semantic search
-index_codebase()
-search_codebase("authentication login", n_results=10)
-```
-
-### Coming back after a break?
-```python
-# Quick overview shows recent activity + decisions from memory
-get_project_overview()
-
-# What happened in last 2 weeks?
-get_recent_changes_summary(days=14)
-
-# See what changed in specific directory
-explore_directory("src/controllers")
-```
-
-### Daily workflow
-```python
-# Morning: quick overview (memory + git)
-get_project_overview()
-
-# Browse recently changed files
-explore_directory("src", depth=2)
-
-# Understand a file before editing
-get_file_summary("src/services/payment.ts")
-
-# Document decision
-update_memory("Switched to JWT tokens for better scalability", 
-              section="Architecture Decisions")
-```
+---
 
 ## Configuration
 
-### Environment Variables
+All settings in `config.py`:
 
-- `PROJECTMIND_MAX_FILE_SIZE_MB`: Maximum file size to index in MB (default: 10)
+| Setting | Default | Description |
+|---|---|---|
+| `MODEL_NAME` | `flax-sentence-embeddings/st-codesearch-distilroberta-base` | Embedding model |
+| `CHUNK_SIZE` | `1500` | Characters per chunk |
+| `MAX_FILE_SIZE_MB` | `10` | Skip files larger than this |
+| `MAX_MEMORY_MB` | `100` | Memory limit for indexing batch |
 
-### Custom Ignore Patterns
-
-Create `.ai/.indexignore` to exclude specific files from indexing:
-
-```
-# Example .indexignore
-test_data/
-*.log
-legacy/
-```
-
-### Code Configuration
-
-Edit `config.py` to customize:
-- Chunk size and overlap for text splitting
-- Ignored directories
-- File type extensions
-- Batch size for indexing
-
-## Development
-
-### Running Tests
-
+Override via environment variables:
 ```bash
-# Run all tests
-pytest tests/
-
-# Run a specific test file
-pytest tests/test_mcp_tools.py
-
-# Run with coverage
-pytest tests/ --cov
+PROJECTMIND_MAX_FILE_SIZE_MB=5
+PROJECTMIND_MAX_MEMORY_MB=200
 ```
 
-### Pre-commit Hooks
+Custom ignore patterns: create `.ai/.indexignore` (same syntax as `.gitignore`).
 
-Install pre-commit hooks for code quality:
+---
 
-```bash
-pip install pre-commit
-pre-commit install
+## Project Structure
+
+```
+mcp_server.py           ← all MCP tool definitions
+config.py               ← configuration
+vector_store_manager.py ← ChromaDB wrapper
+codebase_indexer.py     ← file scanning & chunking
+code_intelligence.py    ← import graph, complexity analysis
+memory_manager.py       ← persistent memory read/write
+incremental_indexing.py ← change tracking
+context.py              ← dependency injection
 ```
 
-This will run:
-- Black (code formatting)
-- Ruff (linting)
-- MyPy (type checking)
-- YAML/JSON/TOML validators
-
-### Code Quality Tools
-
-```bash
-# Format code
-black .
-
-# Lint code
-ruff check . --fix
-
-# Type check
-mypy mcp_server.py config.py --ignore-missing-imports
-```
-
-## Resources
-
-### `project://memory`
-Reads the project memory file directly as a resource.
-
-## Architecture
-
-### Components
-
-**Core Server:**
-- **mcp_server.py**: Main server with all MCP tools, including progressive exploration tools with memory/git context
-- **config.py**: Centralized configuration management with security features
-- **context.py**: Dependency injection via `AppContext`
-
-**Class-Based Modules:**
-- **vector_store_manager.py**: ChromaDB management with query caching
-- **memory_manager.py**: Memory operations with versioning support
-- **codebase_indexer.py**: File scanning, chunking, and indexing logic
-- **git_utils.py**: Git operations (commits, file history, recently changed files, branch info)
-- **cache_manager.py**: Multi-layer caching (LRU, TTL, File caches)
-- **logger.py**: Centralized rotating file logging
-- **incremental_indexing.py**: Atomic metadata operations
-
-**Infrastructure:**
-- **pyproject.toml**: Modern Python project configuration
-- **.pre-commit-config.yaml**: Pre-commit hooks for code quality
-- **.github/workflows/ci.yml**: CI/CD pipeline with 7 test suites
-- **tests/**: Comprehensive unit test suite (62 tests)
-
-### Technology Stack
-
-- **MCP Server**: FastMCP
-- **Vector Store**: ChromaDB (persistent)
-- **Embeddings**: sentence-transformers (all-MiniLM-L6-v2)
-- **Text Splitting**: LangChain RecursiveCharacterTextSplitter
-- **Git Integration**: GitPython
-- **Caching**: Custom LRU/TTL implementations
-- **Testing**: unittest with mock isolation
-- **Security**: Path validation, atomic file operations
-
-## Troubleshooting
-
-### Server hangs for 10-15 minutes on large projects
-Use the progressive exploration tools (`get_project_overview`, `explore_directory`, `get_file_summary`) instead of `index_codebase`. These work instantly without loading ML models or indexing files. Only call `index_codebase` when you need semantic search.
-
-### Vector store not initialized
-The vector store is lazy-loaded on first use. Run `index_codebase()` first. The progressive exploration tools do **not** require the vector store.
-
-### Large files being skipped
-Files larger than 10MB are skipped by default. Set `PROJECTMIND_MAX_FILE_SIZE_MB` to increase the limit.
-
-### Git history not showing
-Ensure you're in a git repository. The tool searches parent directories automatically. If git is unavailable, the tools still work — they just skip git-related sections.
+---
 
 ## Contributing
 
-1. Fork the repository
-2. Install development dependencies: `pip install -e ".[dev]"`
-3. Install pre-commit hooks: `pre-commit install`
-4. Make your changes
-5. Run tests: `pytest tests/`
-6. Submit a pull request
+Issues and PRs are welcome. This is an open project — built in the open, improved in the open.
+
+```bash
+pip install -e ".[dev]"
+pytest tests/
+ruff check .
+```
+
+---
 
 ## License
 
-MIT License - feel free to use and modify as needed.
+MIT
+
+---
+
+*Built with AI assistance — [Zencoder](https://zencoder.ai) was used throughout development for coding, debugging, refactoring, and documentation.*

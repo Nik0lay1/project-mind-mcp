@@ -1,6 +1,10 @@
 # AI/Vector Store Data
 .ai/
 
+# Screenshots and local media
+screen-shorts/
+screenshots/
+
 # Python
 __pycache__/
 *.pyc

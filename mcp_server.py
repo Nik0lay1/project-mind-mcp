@@ -1169,7 +1169,7 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
             metadatas = main_results.get("metadatas", [[]])[0]
             files = []
             for meta in metadatas:
-                fp = meta.get("file_path", "")
+                fp = meta.get("source", "")
                 if fp and "test" not in fp.lower() and "spec" not in fp.lower():
                     files.append(fp)
 
@@ -1184,7 +1184,7 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
             metadatas = config_results.get("metadatas", [[]])[0]
             files = set()
             for meta in metadatas:
-                fp = meta.get("file_path", "")
+                fp = meta.get("source", "")
                 if fp and any(
                     x in fp.lower()
                     for x in ["config", "settings", "env", ".json", ".yaml", ".toml"]
@@ -1202,7 +1202,7 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
             metadatas = test_results.get("metadatas", [[]])[0]
             files = set()
             for meta in metadatas:
-                fp = meta.get("file_path", "")
+                fp = meta.get("source", "")
                 if fp and ("test" in fp.lower() or "spec" in fp.lower()):
                     files.add(fp)
 
@@ -1218,7 +1218,7 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
 
         if main_results and main_results.get("metadatas"):
             impl_files = [
-                m.get("file_path") for m in main_results["metadatas"][0] if m.get("file_path")
+                m.get("source") for m in main_results["metadatas"][0] if m.get("source")
             ][:3]
             graph = build_import_graph(config.PROJECT_ROOT)
 
@@ -1627,19 +1627,19 @@ def get_index_stats() -> str:
     Returns statistics about the current vector store (number of chunks).
     This operation is very fast and doesn't trigger vector store initialization.
     """
-    # Check if vector store exists without creating context
     vector_db_path = config.VECTOR_STORE_DIR / "chroma.sqlite3"
     if not vector_db_path.exists():
         return "Vector store not initialized. Run index_codebase() first."
 
-    # Only create context if vector DB exists
-    ctx = get_context()
-    if not ctx.vector_store._initialized:
-        return "Vector store not initialized. Run index_codebase() first."
-    count = ctx.vector_store.get_count()
-    if count is None:
-        return "Vector store not initialized."
-    return f"Vector store contains {count} chunks."
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(str(vector_db_path))
+        count = conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+        conn.close()
+        return f"Vector store contains {count} chunks."
+    except Exception as e:
+        return f"Error reading vector store: {e}"
 
 
 @mcp.tool()
