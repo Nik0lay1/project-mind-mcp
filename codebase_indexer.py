@@ -219,13 +219,13 @@ class CodebaseIndexer:
         logger.info(f"Scanning files (memory limit: {max_memory / 1024 / 1024:.0f} MB)...")
 
         indexable_files = self.scan_indexable_files(root_dir, ignored_dirs, ignore_patterns)
-        
+
         # Apply limit to prevent extremely long operations
         total_files = len(indexable_files)
         if total_files > MAX_FILES_PER_INDEX:
             logger.warning(f"Limiting index to {MAX_FILES_PER_INDEX} of {total_files} files")
             indexable_files = indexable_files[:MAX_FILES_PER_INDEX]
-        
+
         file_count = 0
 
         for file_path in indexable_files:

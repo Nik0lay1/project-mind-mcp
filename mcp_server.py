@@ -1,7 +1,8 @@
 import os
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from time import time
 
@@ -1498,7 +1499,7 @@ MAX_INDEX_FILES = 5000  # Maximum files to index per operation
 def index_codebase(force: bool = False, timeout: int = DEFAULT_INDEX_TIMEOUT) -> str:
     """
     Indexes the entire codebase for semantic search.
-    
+
     This is a long-running operation. Use timeout parameter to control max execution time.
     For large codebases, consider using index_changed_files() instead.
 
@@ -1519,13 +1520,13 @@ def index_codebase(force: bool = False, timeout: int = DEFAULT_INDEX_TIMEOUT) ->
 
     # Submit indexing work to thread pool with timeout
     future = _indexing_executor.submit(
-        ctx.indexer.index_all, 
-        root_dir, 
-        ignored_dirs, 
-        ignore_patterns, 
+        ctx.indexer.index_all,
+        root_dir,
+        ignored_dirs,
+        ignore_patterns,
         force
     )
-    
+
     try:
         result = future.result(timeout=timeout)
         return result
@@ -1926,7 +1927,7 @@ def get_recent_changes_summary(days: int = 7) -> str:
 def index_changed_files(timeout: int = 120) -> str:
     """
     Incrementally indexes only changed files since last indexing.
-    
+
     This is faster than index_codebase but requires previous indexing to work.
     Has a shorter default timeout as it typically processes fewer files.
 
@@ -1946,12 +1947,12 @@ def index_changed_files(timeout: int = 120) -> str:
 
     # Submit indexing work to thread pool with timeout
     future = _indexing_executor.submit(
-        ctx.indexer.index_changed, 
-        root_dir, 
-        ignored_dirs, 
+        ctx.indexer.index_changed,
+        root_dir,
+        ignored_dirs,
         ignore_patterns
     )
-    
+
     try:
         result = future.result(timeout=timeout)
         return result
