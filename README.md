@@ -55,8 +55,8 @@ Cyclomatic complexity, pylint scores, test coverage tracking — all queryable v
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/Nik0lay1/ProjectMindMCP.git
-cd ProjectMindMCP
+git clone https://github.com/Nik0lay1/project-mind-mcp.git
+cd project-mind-mcp
 python -m venv .venv
 
 # Windows
