@@ -69,6 +69,7 @@ MEMORY_FILE = AI_DIR / "memory.md"
 VECTOR_STORE_DIR = AI_DIR / "vector_store"
 INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
 INDEX_METADATA_FILE = AI_DIR / "index_metadata.json"
+BM25_INDEX_PATH = AI_DIR / "bm25_index.pkl"
 MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
 LOG_FILE = AI_DIR / "projectmind.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -77,13 +78,14 @@ LOG_BACKUP_COUNT = 5
 
 def reconfigure(new_root: Path) -> None:
     global PROJECT_ROOT, AI_DIR, MEMORY_FILE, VECTOR_STORE_DIR
-    global INDEX_IGNORE_FILE, INDEX_METADATA_FILE, MEMORY_HISTORY_DIR, LOG_FILE
+    global INDEX_IGNORE_FILE, INDEX_METADATA_FILE, BM25_INDEX_PATH, MEMORY_HISTORY_DIR, LOG_FILE
     PROJECT_ROOT = new_root.resolve()
     AI_DIR = PROJECT_ROOT / ".ai"
     MEMORY_FILE = AI_DIR / "memory.md"
     VECTOR_STORE_DIR = AI_DIR / "vector_store"
     INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
     INDEX_METADATA_FILE = AI_DIR / "index_metadata.json"
+    BM25_INDEX_PATH = AI_DIR / "bm25_index.pkl"
     MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
     LOG_FILE = AI_DIR / "projectmind.log"
 

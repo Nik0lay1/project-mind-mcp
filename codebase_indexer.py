@@ -220,6 +220,9 @@ class CodebaseIndexer:
 
         indexer.flush()
 
+        logger.info("Rebuilding BM25 index...")
+        self.vector_store.rebuild_bm25()
+
         stats = indexer.get_stats()
         return f"Indexed {file_count} files ({stats['total_chunks']} chunks in {stats['total_batches']} batches)."
 
@@ -262,6 +265,9 @@ class CodebaseIndexer:
         existing_files = {str(f) for f in all_files}
         metadata.remove_deleted_files(existing_files)
         metadata.save()
+
+        logger.info("Rebuilding BM25 index...")
+        self.vector_store.rebuild_bm25()
 
         stats = indexer.get_stats()
         return f"Incrementally indexed {file_count} changed files ({stats['total_chunks']} chunks in {stats['total_batches']} batches)."

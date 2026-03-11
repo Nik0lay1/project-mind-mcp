@@ -965,7 +965,7 @@ def search_with_dependencies(
         if coll is None:
             return "Vector store not initialized. Run index_codebase() first."
 
-        results = ctx.vector_store.query(query_texts=[query], n_results=n_results)
+        results = ctx.vector_store.hybrid_query(query_texts=[query], n_results=n_results)
 
         if not results or not results.get("documents") or not results["documents"][0]:
             return "No results found"
@@ -1052,17 +1052,17 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
             full_query = f"{error_text} {stacktrace}"
 
         # Search in code
-        code_results = ctx.vector_store.query(query_texts=[full_query], n_results=n_results)
+        code_results = ctx.vector_store.hybrid_query(query_texts=[full_query], n_results=n_results)
 
         # Search specifically for exception handling
         exception_query = f"exception error handling try catch {error_text}"
-        exception_results = ctx.vector_store.query(
+        exception_results = ctx.vector_store.hybrid_query(
             query_texts=[exception_query], n_results=n_results
         )
 
         # Search for tests
         test_query = f"test {error_text}"
-        test_results = ctx.vector_store.query(query_texts=[test_query], n_results=n_results)
+        test_results = ctx.vector_store.hybrid_query(query_texts=[test_query], n_results=n_results)
 
         lines = ["# ERROR DEBUGGING SEARCH\n"]
         lines.append(f"Error: {error_text}\n")
@@ -1152,15 +1152,17 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
             return "Vector store not initialized. Run index_codebase() first."
 
         # Main search
-        main_results = ctx.vector_store.query(query_texts=[feature_name], n_results=n_results)
+        main_results = ctx.vector_store.hybrid_query(
+            query_texts=[feature_name], n_results=n_results
+        )
 
         # Config search
         config_query = f"config configuration {feature_name}"
-        config_results = ctx.vector_store.query(query_texts=[config_query], n_results=5)
+        config_results = ctx.vector_store.hybrid_query(query_texts=[config_query], n_results=5)
 
         # Test search
         test_query = f"test {feature_name}"
-        test_results = ctx.vector_store.query(query_texts=[test_query], n_results=5)
+        test_results = ctx.vector_store.hybrid_query(query_texts=[test_query], n_results=5)
 
         lines = [f"# FEATURE SEARCH: {feature_name}\n"]
 
@@ -1268,7 +1270,7 @@ def search_architecture(component: str, n_results: int = 10) -> str:
             return "Vector store not initialized. Run index_codebase() first."
 
         # Search for component
-        results = ctx.vector_store.query(query_texts=[component], n_results=n_results)
+        results = ctx.vector_store.hybrid_query(query_texts=[component], n_results=n_results)
 
         if not results or not results.get("documents") or not results["documents"][0]:
             return f"No results found for component: {component}"
@@ -1509,7 +1511,7 @@ def search_codebase(query: str, n_results: int = 5) -> str:
 
     try:
         ctx = get_context()
-        results = ctx.vector_store.query(query_texts=[query], n_results=n_results)
+        results = ctx.vector_store.hybrid_query(query_texts=[query], n_results=n_results)
 
         if results is None:
             return "Vector store not initialized."

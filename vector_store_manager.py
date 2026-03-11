@@ -3,6 +3,7 @@ import json
 from typing import Any
 
 import config
+from bm25_index import BM25Index, reciprocal_rank_fusion
 from cache_manager import TTLCache
 from logger import get_logger
 
@@ -28,6 +29,7 @@ class VectorStoreManager:
         self.embedding_fn: Any = None
         self._initialized = False
         self._query_cache = TTLCache(ttl_seconds=300, max_size=100)
+        self._bm25_index = BM25Index(config.BM25_INDEX_PATH)
 
     def initialize(self) -> bool:
         """
@@ -66,6 +68,7 @@ class VectorStoreManager:
 
             self._initialized = True
             logger.info("Vector Store initialized successfully")
+            self._bm25_index.load()
             return True
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
@@ -100,6 +103,7 @@ class VectorStoreManager:
                 embedding_function=self.embedding_fn,
                 metadata={"hnsw:space": "cosine"},
             )
+            self._bm25_index.clear()
             logger.info(f"Collection '{self.collection_name}' cleared successfully")
             return None
         except Exception as e:
@@ -224,3 +228,105 @@ class VectorStoreManager:
         except Exception as e:
             logger.error(f"Error upserting to collection: {e}", exc_info=True)
             return False
+
+    def get_all_documents(self) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+        """
+        Fetches all documents from ChromaDB for BM25 rebuild.
+
+        Returns:
+            Tuple of (ids, texts, metadatas)
+        """
+        coll = self.get_collection()
+        if coll is None:
+            return [], [], []
+        try:
+            total = coll.count()
+            if total == 0:
+                return [], [], []
+            result = coll.get(include=["documents", "metadatas"])
+            ids: list[str] = result.get("ids", [])
+            docs: list[str] = result.get("documents", []) or []
+            metas: list[dict[str, Any]] = result.get("metadatas", []) or []
+            return ids, docs, metas
+        except Exception as e:
+            logger.error(f"Error fetching all documents: {e}")
+            return [], [], []
+
+    def rebuild_bm25(self) -> None:
+        """Rebuilds BM25 index from all ChromaDB documents and persists it."""
+        ids, docs, metas = self.get_all_documents()
+        if not ids:
+            logger.warning("No documents to build BM25 index from")
+            return
+        self._bm25_index.build(ids, docs, metas)
+        self._bm25_index.save()
+
+    def hybrid_query(
+        self,
+        query_texts: list[str],
+        n_results: int = 5,
+        where: dict[str, Any] | None = None,
+        where_document: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Hybrid search: combines vector (ChromaDB) + keyword (BM25) via Reciprocal Rank Fusion.
+        Falls back to pure vector search when metadata filters are present or BM25 is not ready.
+
+        Args:
+            query_texts: List of query strings (uses first element)
+            n_results: Number of results to return
+            where: Optional metadata filter (disables BM25)
+            where_document: Optional document content filter (disables BM25)
+
+        Returns:
+            Query results in ChromaDB format or None if failed
+        """
+        if where or where_document or not self._bm25_index.is_ready:
+            return self.query(query_texts, n_results, where, where_document)
+
+        cache_key = "hybrid_" + self._generate_cache_key(query_texts, n_results, None, None)
+        cached = self._query_cache.get(cache_key)
+        if cached is not None:
+            logger.debug(f"Hybrid cache hit for: {query_texts[0][:50]}")
+            return cached
+
+        fetch_n = min(n_results * 3, 50)
+        query_text = query_texts[0]
+
+        vector_raw = self.query(query_texts, n_results=fetch_n)
+        vector_items: list[dict[str, Any]] = []
+        if vector_raw and vector_raw.get("ids") and vector_raw["ids"][0]:
+            for i, doc_id in enumerate(vector_raw["ids"][0]):
+                vector_items.append(
+                    {
+                        "id": doc_id,
+                        "text": (
+                            (vector_raw.get("documents") or [[]])[0][i]
+                            if vector_raw.get("documents")
+                            else ""
+                        ),
+                        "metadata": (
+                            (vector_raw.get("metadatas") or [[]])[0][i]
+                            if vector_raw.get("metadatas")
+                            else {}
+                        ),
+                        "distance": (
+                            (vector_raw.get("distances") or [[]])[0][i]
+                            if vector_raw.get("distances")
+                            else 0.0
+                        ),
+                    }
+                )
+
+        bm25_items = self._bm25_index.search(query_text, n=fetch_n)
+
+        merged = reciprocal_rank_fusion(vector_items, bm25_items, n=n_results)
+
+        result: dict[str, Any] = {
+            "ids": [[item["id"] for item in merged]],
+            "documents": [[item["text"] for item in merged]],
+            "metadatas": [[item["metadata"] for item in merged]],
+            "distances": [[item.get("distance", 0.0) for item in merged]],
+        }
+        self._query_cache.put(cache_key, result)
+        return result

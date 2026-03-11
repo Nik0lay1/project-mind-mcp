@@ -24,6 +24,7 @@ dependencies = [
     "tree-sitter-go>=0.25.0",
     "tree-sitter-rust>=0.24.0",
     "tree-sitter-ruby>=0.23.0",
+    "rank-bm25>=0.2.2",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ build-backend = "setuptools.build_meta"
 py-modules = [
     "mcp_server",
     "ast_splitter",
+    "bm25_index",
     "config",
     "logger",
     "cache_manager",
