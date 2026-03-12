@@ -194,8 +194,9 @@ class TestGetIndexStats:
 
         mock_conn = MagicMock()
         mock_conn.execute.return_value.fetchone.return_value = [100]
-        with patch("pathlib.Path.exists", return_value=True), patch(
-            "sqlite3.connect", return_value=mock_conn
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("sqlite3.connect", return_value=mock_conn),
         ):
             result = get_index_stats()
         assert "100" in result
