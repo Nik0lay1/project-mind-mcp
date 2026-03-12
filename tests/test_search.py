@@ -25,11 +25,13 @@ def mock_vector_store() -> MagicMock:
     store = MagicMock()
     store.get_collection.return_value = MagicMock()
     store.get_count.return_value = 100
-    store.query.return_value = {
+    _search_result = {
         "documents": [["def hello():\n    pass", "class World:\n    pass"]],
         "metadatas": [[{"source": "test.py"}, {"source": "world.py"}]],
         "distances": [[0.1, 0.3]],
     }
+    store.query.return_value = _search_result
+    store.hybrid_query.return_value = _search_result
     store.get_query_cache_stats.return_value = {
         "hits": 5,
         "misses": 10,
@@ -113,7 +115,7 @@ class TestSearchCodebase:
 
         result = search_codebase("hello", n_results=5)
         assert "test.py" in result
-        mock_vector_store.query.assert_called_once()
+        mock_vector_store.hybrid_query.assert_called_once()
 
     def test_search_no_matches(
         self, mock_context: AppContext, mock_vector_store: MagicMock
@@ -121,7 +123,7 @@ class TestSearchCodebase:
         """Test search with no matches."""
         from mcp_server import search_codebase
 
-        mock_vector_store.query.return_value = {"documents": [[]], "metadatas": [[]]}
+        mock_vector_store.hybrid_query.return_value = {"documents": [[]], "metadatas": [[]]}
         result = search_codebase("nonexistent")
         assert "No matches found" in result
 
@@ -131,7 +133,7 @@ class TestSearchCodebase:
         """Test search when vector store returns None."""
         from mcp_server import search_codebase
 
-        mock_vector_store.query.return_value = None
+        mock_vector_store.hybrid_query.return_value = None
         result = search_codebase("test")
         assert "not initialized" in result.lower()
 
@@ -169,7 +171,7 @@ class TestSearchCodebaseAdvanced:
         """Test search with directory exclusion."""
         from mcp_server import search_codebase_advanced
 
-        mock_vector_store.query.return_value = {
+        mock_vector_store.hybrid_query.return_value = {
             "documents": [["code in tests", "code in src"]],
             "metadatas": [[{"source": "tests/test.py"}, {"source": "src/main.py"}]],
             "distances": [[0.1, 0.2]],
@@ -186,9 +188,16 @@ class TestGetIndexStats:
         self, mock_context: AppContext, mock_vector_store: MagicMock
     ) -> None:
         """Test successful stats retrieval."""
+        from unittest.mock import patch
+
         from mcp_server import get_index_stats
 
-        result = get_index_stats()
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchone.return_value = [100]
+        with patch("pathlib.Path.exists", return_value=True), patch(
+            "sqlite3.connect", return_value=mock_conn
+        ):
+            result = get_index_stats()
         assert "100" in result
         assert "chunks" in result.lower()
 
@@ -196,10 +205,12 @@ class TestGetIndexStats:
         self, mock_context: AppContext, mock_vector_store: MagicMock
     ) -> None:
         """Test stats when vector store not initialized."""
+        from unittest.mock import patch
+
         from mcp_server import get_index_stats
 
-        mock_vector_store.get_count.return_value = None
-        result = get_index_stats()
+        with patch("pathlib.Path.exists", return_value=False):
+            result = get_index_stats()
         assert "not initialized" in result.lower()
 
 

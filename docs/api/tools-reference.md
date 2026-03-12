@@ -61,50 +61,42 @@ delete_memory_section("Old Notes")
 
 ## Codebase Indexing & Search
 
-### `index_codebase(force: bool = False, timeout: int = 300)`
+### `index_codebase(force: bool = False)`
 Indexes the entire codebase for vector search.
 
 **Parameters:**
 - `force` (bool, optional): If True, clears and rebuilds index (default: False)
-- `timeout` (int, optional): Maximum time in seconds (default: 300/5min)
 
 **Features:**
 - Respects `.ai/.indexignore` patterns
 - Filters binary files automatically
 - File size limit: 10MB (configurable)
 - Supports 50+ file types
-- Runs in background thread with timeout protection
 - Maximum 5000 files per indexing operation
 
-**Returns:** Index summary with file/chunk count, or timeout warning
+**Returns:** Index summary with file/chunk count
 
 **Example:**
 ```python
-index_codebase(force=True)                    # Full reindex
-index_codebase(timeout=600)                   # 10 min timeout for large projects
+index_codebase(force=True)   # Full reindex
 ```
 
 ---
 
-### `index_changed_files(timeout: int = 120)`
+### `index_changed_files()`
 🆕 **Incremental indexing** - only indexes modified files.
-
-**Parameters:**
-- `timeout` (int, optional): Maximum time in seconds (default: 120/2min)
 
 **Features:**
 - 10-100x faster than full indexing
 - Tracks modification times
 - Auto-removes deleted files
 - Metadata stored in `.ai/index_metadata.json`
-- Runs in background thread with timeout protection
 
-**Returns:** Summary of indexed changes, or timeout warning
+**Returns:** Summary of indexed changes
 
 **Example:**
 ```python
-index_changed_files()              # Daily workflow
-index_changed_files(timeout=300)   # 5 min timeout for many changes
+index_changed_files()   # Daily workflow
 ```
 
 ---
