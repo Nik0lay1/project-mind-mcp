@@ -1385,63 +1385,72 @@ def project_onboarding() -> str:
     """
     ensure_startup()
     try:
-        brief_parts: list[str] = []
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        brief_parts.append(get_project_overview())
+        results: dict[str, str] = {}
+
+        def _run_overview() -> tuple[str, str]:
+            return "overview", get_project_overview()
+
+        def _run_conventions() -> tuple[str, str]:
+            try:
+                from code_intelligence import detect_conventions
+                return "conventions", detect_conventions(config.PROJECT_ROOT)
+            except Exception:
+                return "conventions", ""
+
+        def _run_deps() -> tuple[str, str]:
+            try:
+                from code_intelligence import check_dependencies as _check_deps
+                return "deps", _check_deps(config.PROJECT_ROOT)
+            except Exception:
+                return "deps", ""
+
+        def _run_todos() -> tuple[str, str]:
+            try:
+                from code_intelligence import extract_todos
+                return "todos", extract_todos(config.PROJECT_ROOT, max_files=500)
+            except Exception:
+                return "todos", ""
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(_run_overview),
+                executor.submit(_run_conventions),
+                executor.submit(_run_deps),
+                executor.submit(_run_todos),
+            ]
+            for future in as_completed(futures):
+                key, val = future.result()
+                results[key] = val
+
+        brief_parts: list[str] = []
+        brief_parts.append(results.get("overview", ""))
         brief_parts.append("")
 
-        try:
-            from code_intelligence import detect_conventions
-
-            conventions = detect_conventions(config.PROJECT_ROOT)
+        if conventions := results.get("conventions", ""):
             brief_parts.append(conventions)
             brief_parts.append("")
-        except Exception:
-            pass
 
-        try:
-            from code_intelligence import check_dependencies as _check_deps
-
-            deps = _check_deps(config.PROJECT_ROOT)
+        if deps := results.get("deps", ""):
             if "No dependency files" not in deps:
                 brief_parts.append(deps)
                 brief_parts.append("")
-        except Exception:
-            pass
 
-        try:
-            from code_intelligence import extract_todos
-
-            todos = extract_todos(config.PROJECT_ROOT, max_files=2000)
+        if todos := results.get("todos", ""):
             if "No TODO" not in todos:
                 brief_parts.append(todos)
                 brief_parts.append("")
-        except Exception:
-            pass
 
         full_brief = "\n".join(brief_parts)
 
         try:
             ctx = get_context()
             summary_lines = ["Auto-generated project onboarding brief."]
-
-            try:
-                from code_intelligence import detect_conventions
-
-                conv = detect_conventions(config.PROJECT_ROOT)
-                ctx.memory_manager.update(conv, section="Project Conventions")
-            except Exception:
-                pass
-
-            try:
-                from code_intelligence import check_dependencies as _check_deps
-
-                deps = _check_deps(config.PROJECT_ROOT)
-                if "No dependency files" not in deps:
-                    ctx.memory_manager.update(deps, section="Dependencies")
-            except Exception:
-                pass
-
+            if conventions:
+                ctx.memory_manager.update(conventions, section="Project Conventions")
+            if deps and "No dependency files" not in deps:
+                ctx.memory_manager.update(deps, section="Dependencies")
             summary_lines.append("Conventions and dependencies saved to memory.")
             ctx.memory_manager.update("\n".join(summary_lines), section="Onboarding")
         except Exception:
