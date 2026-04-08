@@ -7,7 +7,8 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  test:
+  fast:
+    name: Unit Tests (fast)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,7 +22,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Cache dependencies
+    - name: Cache pip
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
@@ -42,28 +43,50 @@ jobs:
 
     - name: Run mypy
       run: |
-        mypy mcp_server.py config.py logger.py incremental_indexing.py memory_limited_indexer.py --ignore-missing-imports
-      continue-on-error: true
+        mypy mcp_server.py config.py logger.py memory_manager.py incremental_indexing.py memory_limited_indexer.py --ignore-missing-imports
 
-    - name: Run security tests
-      run: python tests/test_path_validation.py
+    - name: Run unit tests (no ML model)
+      run: |
+        pytest -m "not integration" --cov=. --cov-report=term-missing --cov-fail-under=80
 
-    - name: Run Unicode tests
-      run: python tests/test_unicode_handling.py
+  integration:
+    name: Integration Tests (slow, ML model)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
-    - name: Run logging tests
-      run: python tests/test_logging.py
+    steps:
+    - uses: actions/checkout@v4
 
-    - name: Run transactional save tests
-      run: python tests/test_transactional_save.py
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
-    - name: Run memory limit tests
-      run: python tests/test_memory_limits.py
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Cache HuggingFace ML model
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/huggingface
+        key: hf-flax-codesearch-distilroberta-v1
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
 
     - name: Run integration tests
-      run: python tests/test_mcp_tools.py
+      run: |
+        pytest -m integration --timeout=300 -v
 
   security:
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4

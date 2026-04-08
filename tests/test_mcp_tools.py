@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.append(os.getcwd())
 
 try:
@@ -73,6 +75,8 @@ def test_memory_management() -> None:
     print("Memory management verification passed.")
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(300)
 def test_rag_tools() -> None:
     print("\n--- Testing RAG Tools ---")
 
@@ -175,6 +179,8 @@ def test_analysis_tools() -> None:
     print("Analysis tools verification passed.")
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(300)
 def test_incremental_indexing() -> None:
     print("\n--- Testing Incremental Indexing ---")
 
@@ -190,6 +196,8 @@ def test_incremental_indexing() -> None:
     print("Incremental indexing verification passed.")
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(300)
 def test_advanced_search() -> None:
     print("\n--- Testing Advanced Search ---")
 

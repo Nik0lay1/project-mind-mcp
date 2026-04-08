@@ -31,6 +31,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-timeout>=2.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
@@ -104,8 +105,24 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+    "ast_splitter",
+    "vector_store_manager",
+    "code_intelligence",
+    "codebase_indexer",
+    "bm25_index",
+    "cache_manager",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
 addopts = "-v --cov=. --cov-report=term-missing"
+timeout = 30
+timeout_method = "thread"
+markers = [
+    "integration: tests that require ML model loading and real vector store (slow)",
+]

@@ -133,8 +133,9 @@ class GitRepository:
                 if info.date < cutoff:
                     break
                 for path in commit.stats.files:
-                    if path not in result:
-                        result[path] = info
+                    key = str(path)
+                    if key not in result:
+                        result[key] = info
                         if len(result) >= max_files:
                             return result
         except Exception:

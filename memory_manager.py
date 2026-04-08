@@ -1,5 +1,6 @@
 import json
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,8 @@ class MemoryManager:
     Manages project memory operations.
     Encapsulates reading, updating, versioning of memory.md file.
     """
+
+    _lock = threading.RLock()
 
     def __init__(self, memory_file: Path | None = None):
         self.memory_file = memory_file if memory_file is not None else config.MEMORY_FILE
@@ -34,7 +37,8 @@ class MemoryManager:
             return "Memory file not found."
 
         try:
-            content = self.memory_file.read_text()
+            with self._lock:
+                content = self.memory_file.read_text()
 
             if max_lines is None:
                 return content
@@ -70,8 +74,9 @@ class MemoryManager:
         try:
             new_entry = f"\n\n### Update ({section})\n{content}"
 
-            with open(self.memory_file, "a") as f:
-                f.write(new_entry)
+            with self._lock:
+                with open(self.memory_file, "a") as f:
+                    f.write(new_entry)
 
             logger.info(f"Memory updated: {section}")
             return "Memory updated successfully."
@@ -106,11 +111,13 @@ class MemoryManager:
 ## Recent Decisions
 - Memory cleared.
 """
-                self.memory_file.write_text(template)
+                with self._lock:
+                    self.memory_file.write_text(template)
                 logger.info("Memory cleared (template preserved)")
                 return "Memory cleared (template preserved)."
             else:
-                self.memory_file.write_text("")
+                with self._lock:
+                    self.memory_file.write_text("")
                 logger.info("Memory completely cleared")
                 return "Memory completely cleared."
         except Exception as e:
@@ -134,27 +141,28 @@ class MemoryManager:
             return "Error: Section name cannot be empty."
 
         try:
-            content = self.memory_file.read_text()
-            lines = content.split("\n")
-            new_lines = []
-            skip = False
-            skip_level = 0
+            with self._lock:
+                content = self.memory_file.read_text()
+                lines = content.split("\n")
+                new_lines = []
+                skip = False
+                skip_level = 0
 
-            for line in lines:
-                stripped = line.lstrip("#")
-                current_level = len(line) - len(stripped) if line.startswith("#") else 0
+                for line in lines:
+                    stripped = line.lstrip("#")
+                    current_level = len(line) - len(stripped) if line.startswith("#") else 0
 
-                if current_level >= 2 and section_name.lower() in line.lower():
-                    skip = True
-                    skip_level = current_level
-                    continue
-                elif skip and current_level > 0 and current_level <= skip_level:
-                    skip = False
+                    if current_level >= 2 and section_name.lower() in line.lower():
+                        skip = True
+                        skip_level = current_level
+                        continue
+                    elif skip and current_level > 0 and current_level <= skip_level:
+                        skip = False
 
-                if not skip:
-                    new_lines.append(line)
+                    if not skip:
+                        new_lines.append(line)
 
-            self.memory_file.write_text("\n".join(new_lines))
+                self.memory_file.write_text("\n".join(new_lines))
             logger.info(f"Section '{section_name}' deleted")
             return f"Section '{section_name}' deleted successfully."
         except Exception as e:
@@ -180,7 +188,8 @@ class MemoryManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             version_file = self.history_dir / f"memory_{timestamp}.md"
 
-            shutil.copy2(self.memory_file, version_file)
+            with self._lock:
+                shutil.copy2(self.memory_file, version_file)
 
             metadata_file = self.history_dir / f"memory_{timestamp}.meta.json"
             metadata = {
@@ -258,7 +267,8 @@ class MemoryManager:
 
             self.save_version(description="Auto-backup before restore")
 
-            shutil.copy2(version_file, self.memory_file)
+            with self._lock:
+                shutil.copy2(version_file, self.memory_file)
 
             logger.info(f"Memory restored from version: {timestamp}")
             return f"Memory restored from version: {timestamp}"

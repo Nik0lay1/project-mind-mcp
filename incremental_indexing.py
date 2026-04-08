@@ -2,9 +2,11 @@ import json
 import os
 import sys
 import tempfile
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import config
 
@@ -15,7 +17,7 @@ else:
 
 
 @contextmanager
-def file_lock(file_handle) -> None:  # type: ignore[misc]
+def file_lock(file_handle: Any) -> Generator[None, None, None]:
     """
     Cross-platform file locking context manager.
     Prevents concurrent writes to the same file.
@@ -114,7 +116,7 @@ class IndexMetadata:
             raise
 
     def get_file_mtime(self, file_path: str) -> float:
-        return self.metadata.get(file_path, {}).get("mtime", 0.0)
+        return float(self.metadata.get(file_path, {}).get("mtime", 0.0))
 
     def update_file(self, file_path: str, mtime: float) -> None:
         self.metadata[file_path] = {

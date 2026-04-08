@@ -1147,7 +1147,7 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
                 if error_commits:
                     lines.append("## Recent Related Commits")
                     for commit in error_commits[:5]:
-                        lines.append(f"- [{commit.sha[:7]}] {commit.first_line}")
+                        lines.append(f"- [{commit.hash[:7]}] {commit.first_line}")
                     lines.append("")
             except Exception:
                 pass
@@ -1223,33 +1223,33 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
         # Configuration files
         if config_results and config_results.get("documents") and config_results["documents"][0]:
             metadatas = config_results.get("metadatas", [[]])[0]
-            files = set()
+            config_files: set[str] = set()
             for meta in metadatas:
                 fp = meta.get("source", "")
                 if fp and any(
                     x in fp.lower()
                     for x in ["config", "settings", "env", ".json", ".yaml", ".toml"]
                 ):
-                    files.add(fp)
+                    config_files.add(fp)
 
-            if files:
+            if config_files:
                 lines.append("## Configuration")
-                for file in sorted(files):
+                for file in sorted(config_files):
                     lines.append(f"- `{file}`")
                 lines.append("")
 
         # Tests
         if test_results and test_results.get("documents") and test_results["documents"][0]:
             metadatas = test_results.get("metadatas", [[]])[0]
-            files = set()
+            test_files: set[str] = set()
             for meta in metadatas:
                 fp = meta.get("source", "")
                 if fp and ("test" in fp.lower() or "spec" in fp.lower()):
-                    files.add(fp)
+                    test_files.add(fp)
 
-            if files:
+            if test_files:
                 lines.append("## Tests")
-                for file in sorted(files):
+                for file in sorted(test_files):
                     lines.append(f"- `{file}`")
                 lines.append("")
 
@@ -1395,6 +1395,7 @@ def project_onboarding() -> str:
         def _run_conventions() -> tuple[str, str]:
             try:
                 from code_intelligence import detect_conventions
+
                 return "conventions", detect_conventions(config.PROJECT_ROOT)
             except Exception:
                 return "conventions", ""
@@ -1402,6 +1403,7 @@ def project_onboarding() -> str:
         def _run_deps() -> tuple[str, str]:
             try:
                 from code_intelligence import check_dependencies as _check_deps
+
                 return "deps", _check_deps(config.PROJECT_ROOT)
             except Exception:
                 return "deps", ""
@@ -1409,6 +1411,7 @@ def project_onboarding() -> str:
         def _run_todos() -> tuple[str, str]:
             try:
                 from code_intelligence import extract_todos
+
                 return "todos", extract_todos(config.PROJECT_ROOT, max_files=500)
             except Exception:
                 return "todos", ""
