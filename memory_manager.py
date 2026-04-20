@@ -58,6 +58,10 @@ class MemoryManager:
         """
         Appends new content to memory file.
 
+        Duplicate entries (same content under the same section) are skipped
+        so `auto_update_memory_from_commits` and repeated `update_memory`
+        calls don't bloat the file.
+
         Args:
             content: Content to append
             section: Section name for the update
@@ -72,10 +76,16 @@ class MemoryManager:
             return "Error: Content cannot be empty."
 
         try:
-            new_entry = f"\n\n### Update ({section})\n{content}"
+            normalized_new = content.strip()
+            new_entry = f"\n\n### Update ({section})\n{normalized_new}"
 
             with self._lock:
-                with open(self.memory_file, "a") as f:
+                existing = self.memory_file.read_text(encoding="utf-8", errors="ignore")
+                if self._has_duplicate_update(existing, section, normalized_new):
+                    logger.info(f"Memory update skipped (duplicate): {section}")
+                    return "Memory update skipped (duplicate entry already present)."
+
+                with open(self.memory_file, "a", encoding="utf-8") as f:
                     f.write(new_entry)
 
             logger.info(f"Memory updated: {section}")
@@ -83,6 +93,32 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Error updating memory: {e}")
             return f"Error updating memory: {e}"
+
+    @staticmethod
+    def _has_duplicate_update(existing: str, section: str, normalized_new: str) -> bool:
+        """Checks whether an `### Update (section)` block with identical content already exists."""
+        if not existing:
+            return False
+
+        marker = f"### Update ({section})"
+        lines = existing.split("\n")
+        i = 0
+        while i < len(lines):
+            if lines[i].strip() == marker:
+                block: list[str] = []
+                j = i + 1
+                while j < len(lines):
+                    stripped = lines[j].strip()
+                    if stripped.startswith("### Update (") or stripped.startswith("## "):
+                        break
+                    block.append(lines[j])
+                    j += 1
+                if "\n".join(block).strip() == normalized_new:
+                    return True
+                i = j
+            else:
+                i += 1
+        return False
 
     def clear(self, keep_template: bool = True) -> str:
         """

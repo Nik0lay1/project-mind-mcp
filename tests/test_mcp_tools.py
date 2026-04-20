@@ -44,14 +44,19 @@ def test_memory_tools() -> None:
     print(f"Initial Memory Length: {len(initial_memory)}")
     assert "Project Memory" in initial_memory
 
-    update_result = update_memory(
-        "Decided to use ChromaDB for vector storage.", section="Architecture"
-    )
+    import uuid
+
+    unique_marker = f"test-memory-entry-{uuid.uuid4().hex}"
+    update_result = update_memory(unique_marker, section="Architecture")
     print(f"Update Result: {update_result}")
     assert "successfully" in update_result
 
-    updated_memory = read_memory()
-    assert "Decided to use ChromaDB" in updated_memory
+    updated_memory = read_memory(max_lines=None)
+    assert unique_marker in updated_memory
+
+    dup_result = update_memory(unique_marker, section="Architecture")
+    print(f"Duplicate Update Result: {dup_result}")
+    assert "duplicate" in dup_result.lower()
 
     empty_update = update_memory("", section="Test")
     print(f"Empty Update Result: {empty_update}")

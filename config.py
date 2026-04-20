@@ -75,6 +75,22 @@ LOG_FILE = AI_DIR / "projectmind.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 
+MCP_SERVER_DIR = _MCP_SERVER_DIR
+
+
+def resolve_index_ignore_file() -> Path:
+    """
+    Resolves the active .indexignore file.
+
+    Preference order:
+    1. `<PROJECT_ROOT>/.indexignore`  (user-friendly, next to .gitignore)
+    2. `<PROJECT_ROOT>/.ai/.indexignore`  (legacy location)
+    """
+    root_level = PROJECT_ROOT / ".indexignore"
+    if root_level.exists():
+        return root_level
+    return INDEX_IGNORE_FILE
+
 
 def reconfigure(new_root: Path) -> None:
     global PROJECT_ROOT, AI_DIR, MEMORY_FILE, VECTOR_STORE_DIR
@@ -88,6 +104,14 @@ def reconfigure(new_root: Path) -> None:
     BM25_INDEX_PATH = AI_DIR / "bm25_index.pkl"
     MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
     LOG_FILE = AI_DIR / "projectmind.log"
+
+
+def is_mcp_server_dir(path: Path) -> bool:
+    """Returns True if `path` is the directory where ProjectMind MCP itself lives."""
+    try:
+        return path.resolve() == MCP_SERVER_DIR
+    except OSError:
+        return False
 
 
 MODEL_NAME = "flax-sentence-embeddings/st-codesearch-distilroberta-base"

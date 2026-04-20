@@ -8,10 +8,13 @@ from mcp.server.fastmcp import FastMCP
 
 import config
 from config import (
+    MCP_SERVER_DIR,
     get_file_cache_stats,
     get_ignored_dirs,
     is_dir_ignored,
+    is_mcp_server_dir,
     reconfigure,
+    resolve_index_ignore_file,
     validate_path,
 )
 from context import get_context, reset_context
@@ -165,23 +168,192 @@ def set_project_root(path: str) -> str:
     _startup_done = False
     ensure_startup()
     log(f"Project root changed to: {config.PROJECT_ROOT}")
-    return f"Project root set to: {config.PROJECT_ROOT}"
+
+    msg = f"Project root set to: {config.PROJECT_ROOT}"
+    if is_mcp_server_dir(target):
+        msg += (
+            "\n\n⚠️ Warning: This path is the ProjectMind MCP server's OWN directory. "
+            "If you intended to index a different project, call `set_project_root` "
+            "again with the absolute path to that project."
+        )
+    return msg
+
+
+def _count_index_chunks() -> int | None:
+    """Returns chunk count or None if vector store is missing/unreadable."""
+    import sqlite3
+
+    vector_db_path = config.VECTOR_STORE_DIR / "chroma.sqlite3"
+    if not vector_db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(vector_db_path))
+        count = conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+        conn.close()
+        return int(count)
+    except Exception:
+        return None
+
+
+def _server_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("projectmind")
+    except Exception:
+        try:
+            import tomllib
+
+            data = tomllib.loads((MCP_SERVER_DIR / "pyproject.toml").read_text(encoding="utf-8"))
+            return str(data.get("project", {}).get("version", "unknown"))
+        except Exception:
+            return "unknown"
+
+
+@mcp.tool()
+def health() -> str:
+    """
+    Lightweight readiness check for the ProjectMind MCP server.
+
+    Reports: server version, active project root, memory file status, index status,
+    and whether the configured project is the MCP server's own directory.
+    Does NOT initialize the vector store or embeddings model.
+
+    Returns:
+        Markdown-formatted health report.
+    """
+    ensure_startup()
+
+    version_str = _server_version()
+    root = config.PROJECT_ROOT
+    memory_exists = config.MEMORY_FILE.exists()
+    chunks = _count_index_chunks()
+    own_dir = is_mcp_server_dir(root)
+
+    parts = [
+        "# ProjectMind — Health",
+        f"- **Version**: {version_str}",
+        f"- **MCP server dir**: `{MCP_SERVER_DIR}`",
+        f"- **Project root**: `{root}`",
+        f"- **Memory file**: {'found' if memory_exists else 'missing'} (`{config.MEMORY_FILE}`)",
+        f"- **Vector index**: {('empty' if chunks == 0 else f'{chunks} chunks') if chunks is not None else 'not initialized'}",
+        f"- **Index ignore file**: `{resolve_index_ignore_file()}`",
+    ]
+    if own_dir:
+        parts.append(
+            "\n⚠️ The project root points at the MCP server's own directory. "
+            "If that was not intended, call `set_project_root(<absolute path>)`."
+        )
+    if chunks is None:
+        parts.append("\nℹ️ Run `index_codebase()` to build the semantic index.")
+    return "\n".join(parts)
+
+
+@mcp.tool()
+def session_init(project_path: str = "") -> str:
+    """
+    Single-call session bootstrap. Call this FIRST in every AI session.
+
+    Performs:
+      1. Sets project root (if `project_path` is provided).
+      2. Warns if the chosen root is the MCP server's own directory.
+      3. Reads `.ai/memory.md`.
+      4. Reports vector-index status.
+      5. Runs incremental re-indexing for files changed since last session
+         (skipped if the index has not been built yet).
+
+    Args:
+        project_path: Absolute path to the target project. Leave empty to use
+                      auto-detection (CWD + project markers).
+
+    Returns:
+        Consolidated Markdown brief summarising project root, memory, and index state.
+    """
+    global _startup_done
+
+    sections: list[str] = ["# ProjectMind — Session Init"]
+
+    if project_path and project_path.strip():
+        target = Path(project_path).expanduser().resolve()
+        if not target.exists():
+            return f"Error: project_path does not exist: {project_path}"
+        if not target.is_dir():
+            return f"Error: project_path is not a directory: {project_path}"
+        reconfigure(target)
+        reset_context()
+        _startup_done = False
+        ensure_startup()
+        sections.append(f"**Project root** set to: `{config.PROJECT_ROOT}`")
+    else:
+        ensure_startup()
+        sections.append(
+            f"**Project root** (auto-detected): `{config.PROJECT_ROOT}`\n"
+            "_Tip: pass `project_path` explicitly to avoid ambiguous auto-detection._"
+        )
+
+    if is_mcp_server_dir(config.PROJECT_ROOT):
+        sections.append(
+            "⚠️ The active project root is the MCP server's OWN directory "
+            f"(`{MCP_SERVER_DIR}`). If this was not intentional, call "
+            "`session_init(project_path='<absolute path>')` again."
+        )
+
+    chunks = _count_index_chunks()
+    if chunks is None:
+        sections.append("**Index status**: not initialized. Run `index_codebase()` to build it.")
+    elif chunks == 0:
+        sections.append("**Index status**: empty. Run `index_codebase(force=True)` to rebuild.")
+    else:
+        sections.append(f"**Index status**: {chunks} chunks.")
+
+    try:
+        if config.MEMORY_FILE.exists():
+            content = config.MEMORY_FILE.read_text(encoding="utf-8", errors="ignore")
+            lines = content.split("\n")
+            preview = "\n".join(lines[:60])
+            remaining = max(0, len(lines) - 60)
+            suffix = (
+                f"\n\n_... {remaining} more lines. Call `read_memory(max_lines=None)` for full content._"
+                if remaining
+                else ""
+            )
+            sections.append("## Memory\n" + preview + suffix)
+        else:
+            sections.append("## Memory\n_No memory file yet. It will be created on first update._")
+    except Exception as e:
+        sections.append(f"## Memory\n_Error reading memory: {e}_")
+
+    if chunks is not None and chunks > 0:
+        try:
+            ctx = get_context()
+            if ctx.vector_store.get_collection() is not None:
+                ignored_dirs = get_ignored_dirs()
+                ignore_patterns = load_index_ignore_patterns()
+                inc_result = ctx.indexer.index_changed(
+                    config.PROJECT_ROOT, ignored_dirs, ignore_patterns
+                )
+                sections.append(f"## Incremental re-index\n{inc_result}")
+        except Exception as e:
+            sections.append(f"## Incremental re-index\n_Skipped: {e}_")
+
+    return "\n\n".join(sections)
 
 
 def load_index_ignore_patterns() -> set[str]:
-    if not config.INDEX_IGNORE_FILE.exists():
+    ignore_file = resolve_index_ignore_file()
+    if not ignore_file.exists():
         return set()
 
     try:
         patterns = set()
-        with open(config.INDEX_IGNORE_FILE) as f:
+        with open(ignore_file, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     patterns.add(line)
         return patterns
     except Exception as e:
-        log(f"Error reading .indexignore: {e}")
+        log(f"Error reading .indexignore at {ignore_file}: {e}")
         return set()
 
 
@@ -1334,7 +1506,10 @@ def search_architecture(component: str, n_results: int = 10) -> str:
             for file in main_files[:5]:
                 if file in graph:
                     cluster = _get_cluster(
-                        file, config.PROJECT_ROOT, similarity_threshold=0.4, max_cluster_size=10,
+                        file,
+                        config.PROJECT_ROOT,
+                        similarity_threshold=0.4,
+                        max_cluster_size=10,
                         graph=graph,
                     )
                     if cluster:
@@ -1559,12 +1734,21 @@ def index_codebase(force: bool = False) -> str:
         return "Failed to initialize vector store."
 
     root_dir = config.PROJECT_ROOT
+    warning = ""
+    if is_mcp_server_dir(root_dir):
+        warning = (
+            "⚠️ Warning: indexing the ProjectMind MCP server's OWN directory "
+            f"({root_dir}). If this was not intended, call "
+            "`set_project_root('<absolute path to your project>')` first, "
+            "then re-run `index_codebase`.\n\n"
+        )
+
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
     result = ctx.indexer.index_all(root_dir, ignored_dirs, ignore_patterns, force)
     invalidate_import_graph_cache()
-    return result
+    return warning + result
 
 
 @mcp.tool()

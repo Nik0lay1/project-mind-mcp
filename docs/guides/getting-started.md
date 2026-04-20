@@ -167,13 +167,17 @@ get_recent_changes_summary(days=30)
 # Max file size for indexing (in MB)
 export PROJECTMIND_MAX_FILE_SIZE_MB=20
 
-# Custom model (default: all-MiniLM-L6-v2)
-export PROJECTMIND_MODEL_NAME="custom-model"
+# Max memory budget for a single indexing batch (in MB)
+export PROJECTMIND_MAX_MEMORY_MB=200
+
+# Embedding model used is configured in config.py:
+# flax-sentence-embeddings/st-codesearch-distilroberta-base (~130MB, code-trained, local)
 ```
 
 ### .indexignore
 
-Create `.ai/.indexignore` to exclude files from indexing:
+Create `.indexignore` in your project root to exclude files from indexing
+(fallback location: `.ai/.indexignore`):
 ```
 # Ignore tests
 tests/

@@ -671,9 +671,7 @@ def get_module_cluster(
     return dict(sorted_similar[:max_cluster_size])
 
 
-def _find_related_tests_from_graph(
-    file_path: str, graph: dict[str, list[str]]
-) -> list[str]:
+def _find_related_tests_from_graph(file_path: str, graph: dict[str, list[str]]) -> list[str]:
     name = Path(file_path).stem.lower()
     related = []
     for rel_path in graph:
