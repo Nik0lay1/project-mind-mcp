@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.5] - 2026-06-08 🔎 FULL-FILE L0 SYMBOLS
+
+### Fixed
+- **L0 manifest symbol extraction** — symbols were only scanned in the first 200 lines of each file, so classes/functions defined lower in a module were invisible to the `overview` tier and to `query()`'s L0 layer. Extraction now runs over the whole file (still bounded by the existing 256 KB call-site guard and the `MAX_SYMBOLS_PER_FILE` cap), so deep-in-file definitions are surfaced.
+- Tests: `tests/test_manifest_symbols.py` covering symbols past line 200, dedup order, per-language regexes, and the cap.
+
+### Why
+- The cheap-first `overview`/L0 path is what cheap models hit first. Missing symbols meant the model never learned that a relevant function even existed, forcing needless escalation or hallucinated APIs.
+
+---
+
 ## [0.7.4] - 2026-06-08 🧠 RELEVANCE-RANKED MEMORY
 
 ### Added

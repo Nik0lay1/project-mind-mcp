@@ -33,7 +33,6 @@ MANIFEST_VERSION = 1
 MANIFEST_FILENAME = "manifest.json"
 MAX_FILES_TO_SCAN = 20000
 MAX_SYMBOLS_PER_FILE = 12
-PREVIEW_LINES_FOR_SYMBOLS = 200
 HOT_PATH_LIMIT = 15
 
 _PY_TOP_LEVEL = re.compile(r"^(?:class|def|async def)\s+([A-Za-z_][\w]*)", re.MULTILINE)
@@ -89,14 +88,18 @@ def _detect_language(suffix: str) -> str:
 
 
 def _extract_symbols(content: str, language: str) -> list[str]:
-    """Cheap top-level symbol extraction — first 200 lines only."""
-    head = "\n".join(content.split("\n")[:PREVIEW_LINES_FOR_SYMBOLS])
+    """Top-level symbol extraction across the whole file.
+
+    The call site only invokes this for files <= 256 KB, so scanning the full
+    content (rather than just the first 200 lines) stays cheap while making
+    symbols that live lower in a module visible to the L0 manifest.
+    """
     if language == "python":
-        matches = _PY_TOP_LEVEL.findall(head)
+        matches = _PY_TOP_LEVEL.findall(content)
     elif language in ("javascript", "typescript"):
-        matches = _JS_TOP_LEVEL.findall(head)
+        matches = _JS_TOP_LEVEL.findall(content)
     else:
-        matches = _GENERIC_TOP_LEVEL.findall(head)
+        matches = _GENERIC_TOP_LEVEL.findall(content)
 
     seen: list[str] = []
     for m in matches:
@@ -217,8 +220,8 @@ def build_manifest(
 
     Args:
         root: Project root (defaults to config.PROJECT_ROOT).
-        extract_symbols: If True, reads each file (up to PREVIEW_LINES_FOR_SYMBOLS)
-            to capture top-level symbols. Set False for ultra-fast scan.
+        extract_symbols: If True, reads each file (<= 256 KB) and captures its
+            top-level symbols. Set False for an ultra-fast paths-only scan.
         max_files: Hard safety cap on scanned files.
 
     Returns:

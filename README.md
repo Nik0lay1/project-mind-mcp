@@ -34,7 +34,7 @@ Queries escalate through tiers only when the previous one is insufficient — la
 
 | Tier | Engine | When loaded | Typical latency |
 |---|---|---|---|
-| **L0 Manifest** | `.ai/manifest.json` (paths + symbols) | always | < 50 ms |
+| **L0 Manifest** | `.ai/manifest.json` (paths + whole-file symbols) | always | < 50 ms |
 | **L1 BM25** | `rank-bm25` lexical index | only when L0 weak | ~ 100 ms |
 | **L2 Vector** | ChromaDB + sentence-transformers | only on `intent='semantic'/'deep'` | first call ~ 30 s, then cached |
 
