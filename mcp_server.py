@@ -2471,7 +2471,18 @@ def analyze_code_complexity(target_path: str = ".", mode: str = "quick") -> str:
         if not all_files:
             return "No supported files found (Python, JS, TS, Java, Go, Rust, Ruby)"
 
+        import time
+
+        from config import get_tool_budget_seconds
+
+        time_budget = get_tool_budget_seconds()
+        start = time.monotonic()
+        stopped_early = False
+
         for src_file in all_files[:file_cap]:
+            if file_count > 0 and (time.monotonic() - start) > time_budget:
+                stopped_early = True
+                break
             lang = _LANGUAGE_MAP.get(src_file.suffix.lower(), "unknown")
 
             if lang == "python":
@@ -2514,6 +2525,12 @@ def analyze_code_complexity(target_path: str = ".", mode: str = "quick") -> str:
 
         avg = total_complexity / total_functions if total_functions else 0
         results.append("## Summary")
+        if stopped_early:
+            results.append(
+                f"_Stopped after {file_count}/{min(len(all_files), file_cap)} files "
+                f"(~{time_budget:.0f}s budget) to avoid a timeout. Raise "
+                "PROJECTMIND_TOOL_BUDGET_SECONDS or narrow target_path for full coverage._\n"
+            )
         results.append(f"- Files analyzed: {file_count}")
         results.append(f"- Functions analyzed: {total_functions}")
         results.append(f"- High complexity (>10): {len(high_complexity)}")
@@ -2564,7 +2581,19 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
 
         issues_summary = {"convention": 0, "refactor": 0, "warning": 0, "error": 0}
 
+        import time
+
+        from config import get_tool_budget_seconds
+
+        time_budget = get_tool_budget_seconds()
+        start = time.monotonic()
+        analyzed = 0
+        stopped_early = False
+
         for py_file in files_to_check:
+            if analyzed > 0 and (time.monotonic() - start) > time_budget:
+                stopped_early = True
+                break
             try:
                 old_stdout = sys.stdout
                 old_stderr = sys.stderr
@@ -2586,12 +2615,20 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
                     issues_summary["warning"] += stats.warning
                 if hasattr(stats, "error"):
                     issues_summary["error"] += stats.error
+                analyzed += 1
 
             except Exception:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
                 continue
 
+        if stopped_early:
+            results.append(
+                f"_Stopped after {analyzed}/{len(files_to_check)} files "
+                f"(~{time_budget:.0f}s budget) to avoid a timeout. pylint is slow "
+                "per file; raise PROJECTMIND_TOOL_BUDGET_SECONDS or narrow "
+                "target_path for full coverage._\n"
+            )
         results.append("## Issues Summary")
         results.append(f"- Errors: {issues_summary['error']}")
         results.append(f"- Warnings: {issues_summary['warning']}")

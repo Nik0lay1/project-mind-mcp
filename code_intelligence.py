@@ -15,6 +15,7 @@ from config import (
     CODE_EXTENSIONS,
     INDEXABLE_EXTENSIONS,
     get_import_graph_max_files,
+    get_tool_budget_seconds,
     is_dir_ignored,
     safe_read_text,
 )
@@ -720,7 +721,14 @@ def _build_import_graph_uncached(root: Path, max_files: int | None = None) -> di
     resolver = _build_js_resolver(root)
     graph: dict[str, list[str]] = {}
 
+    time_budget = get_tool_budget_seconds()
+    start = time.monotonic()
+    budget_hit = False
+
     for fpath, ext in code_files:
+        if (time.monotonic() - start) > time_budget:
+            budget_hit = True
+            break
         if ext not in CODE_EXTENSIONS:
             continue
         try:
@@ -745,6 +753,16 @@ def _build_import_graph_uncached(root: Path, max_files: int | None = None) -> di
 
         rel_path = str(fpath.relative_to(root)).replace("\\", "/")
         graph[rel_path] = sorted(resolved)
+
+    if budget_hit:
+        logger.warning(
+            "Import graph build hit the %.0fs time budget after %d/%d files; "
+            "some dependency edges are missing. Raise "
+            "PROJECTMIND_TOOL_BUDGET_SECONDS to scan more.",
+            time_budget,
+            len(graph),
+            len(code_files),
+        )
 
     return graph
 

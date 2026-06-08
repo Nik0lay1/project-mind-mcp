@@ -237,12 +237,14 @@ All settings in `config.py`:
 | `MAX_FILE_SIZE_MB` | `10` | Skip files larger than this |
 | `MAX_MEMORY_MB` | `100` | Memory limit for indexing batch |
 | `IMPORT_GRAPH_MAX_FILES` | `8000` | Max files scanned when building the import graph |
+| `TOOL_SOFT_BUDGET_SECONDS` | `20` | Wall-clock budget for analysis tools (`analyze_code_quality`, `analyze_code_complexity`, import-graph build) — they return partial results instead of timing out |
 
 Override via environment variables:
 ```bash
 PROJECTMIND_MAX_FILE_SIZE_MB=5
 PROJECTMIND_MAX_MEMORY_MB=200
 PROJECTMIND_IMPORT_GRAPH_MAX_FILES=20000
+PROJECTMIND_TOOL_BUDGET_SECONDS=45
 ```
 
 Custom ignore patterns: create `.ai/.indexignore` (same syntax as `.gitignore`).

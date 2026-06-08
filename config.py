@@ -122,6 +122,7 @@ BATCH_SIZE = 100
 MAX_FILE_SIZE_MB = 10
 MAX_MEMORY_MB = 100
 IMPORT_GRAPH_MAX_FILES = 8000
+TOOL_SOFT_BUDGET_SECONDS = 20
 
 DEFAULT_IGNORED_DIRS: set[str] = {
     ".git",
@@ -277,6 +278,23 @@ def get_import_graph_max_files() -> int:
         except ValueError:
             pass
     return IMPORT_GRAPH_MAX_FILES
+
+
+def get_tool_budget_seconds() -> float:
+    """
+    Soft wall-clock budget (seconds) for long-running analysis tools so they
+    return partial results instead of timing out the MCP call.
+    Can be overridden via PROJECTMIND_TOOL_BUDGET_SECONDS environment variable.
+    """
+    env_val = os.getenv("PROJECTMIND_TOOL_BUDGET_SECONDS")
+    if env_val:
+        try:
+            parsed = float(env_val)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    return float(TOOL_SOFT_BUDGET_SECONDS)
 
 
 def get_ignored_dirs() -> set[str]:

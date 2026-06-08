@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.8] - 2026-06-08 ⏱️ TOOL TIME BUDGETS (NO MORE TIMEOUTS)
+
+### Fixed
+- **`analyze_code_quality` no longer times out.** It ran `pylint` in-process, sequentially, on up to 10 files (quick) or 100 (deep). Benchmarked at ~52s for a single large file, this tool effectively *always* exceeded the MCP call timeout. It now enforces a soft wall-clock budget, stops after the budget is spent, and returns the partial summary with a note (always analyzes at least one file).
+- **`build_import_graph` is now time-bounded.** The per-file resolution loop could run unbounded toward the 8000-file cap; it now stops at the budget, returns the partial graph, and logs a WARNING telling you edges are missing and how to raise the budget.
+- **`analyze_code_complexity` is time-bounded too** (radon/AST is fast, but deep mode scans up to 1000 files) — same partial-result + note behavior.
+
+### Added
+- `config.TOOL_SOFT_BUDGET_SECONDS` (default `20`) + `get_tool_budget_seconds()`, overridable via `PROJECTMIND_TOOL_BUDGET_SECONDS` (accepts fractional seconds; non-positive/invalid values fall back to the default).
+- Tests: `tests/test_tool_budget.py` covering the config getter (default, env override, fractional, invalid, non-positive, negative, return type) and the import-graph budget guard (stops early, emits warning, generous budget scans all).
+
+### Why
+- Tool timeouts were a frequent, user-reported problem. The audit pinpointed in-process pylint as the dominant offender and the import-graph loop as the scaling risk. A single, env-tunable time budget makes every heavy analysis tool return useful partial output within the MCP call window instead of failing.
+
+---
+
 ## [0.7.7] - 2026-06-08 🐍 PYTHON SRC-LAYOUT & RELATIVE IMPORTS
 
 ### Fixed
