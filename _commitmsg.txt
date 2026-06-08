@@ -1,5 +1,0 @@
-feat(manifest): extract L0 symbols from whole file, not first 200 lines (v0.7.5)
-
-Symbols defined below line 200 were invisible to the L0/overview tier.
-Extraction now scans the full file content (still bounded by the 256 KB
-call-site guard and MAX_SYMBOLS_PER_FILE cap). Adds tests/test_manifest_symbols.py.
