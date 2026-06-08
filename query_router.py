@@ -205,18 +205,50 @@ def _tier_l2(query: str, n: int) -> list[QueryHit]:
 # ---------------------------------------------------------------------------
 
 
-def _merge_hits(buckets: list[list[QueryHit]], limit: int) -> list[QueryHit]:
-    seen: dict[str, QueryHit] = {}
+_RRF_K = 60
+
+
+def _merge_hits(buckets: list[list[QueryHit]], limit: int, k: int = _RRF_K) -> list[QueryHit]:
+    """
+    Fuse hits from multiple tiers (L0/L1/L2) into a single ranking.
+
+    Tier scores live on incompatible scales (L0 is a flat 1.0, L1 is a raw
+    unbounded BM25 score, L2 is 0..1 similarity), so ranking by raw score let
+    one tier dominate the others. Instead we use Reciprocal Rank Fusion (RRF),
+    which depends only on each item's *rank within its own tier* and is therefore
+    scale-invariant. The fused value is normalized to 0..1 (1.0 = top-ranked in
+    every contributing tier) so downstream confidence thresholds stay meaningful.
+    """
+    rrf: dict[str, float] = {}
+    best: dict[str, QueryHit] = {}
+    contributing = 0
     for bucket in buckets:
-        for h in bucket:
-            key = h.source
-            existing = seen.get(key)
-            if existing is None:
-                seen[key] = h
-            elif h.score > existing.score:
-                seen[key] = h
-    ordered = sorted(seen.values(), key=lambda x: x.score, reverse=True)
-    return ordered[:limit]
+        if not bucket:
+            continue
+        contributing += 1
+        for rank, h in enumerate(bucket):
+            rrf[h.source] = rrf.get(h.source, 0.0) + 1.0 / (k + rank + 1)
+            current = best.get(h.source)
+            if current is None or h.score > current.score:
+                best[h.source] = h
+    if not rrf:
+        return []
+    max_possible = contributing / (k + 1)
+    ordered = sorted(rrf, key=lambda s: rrf[s], reverse=True)
+    out: list[QueryHit] = []
+    for source in ordered[:limit]:
+        base = best[source]
+        norm = rrf[source] / max_possible if max_possible > 0 else 0.0
+        out.append(
+            QueryHit(
+                source=base.source,
+                score=round(norm, 4),
+                tier=base.tier,
+                snippet=base.snippet,
+                extra=base.extra,
+            )
+        )
+    return out
 
 
 def query(

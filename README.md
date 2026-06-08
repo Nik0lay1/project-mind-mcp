@@ -43,6 +43,8 @@ Use the unified `query(text, intent, n_results)` tool with one of:
 - `semantic` — L0 + L1 + L2 (escalates to embeddings if signal is weak)
 - `deep` — L0 + L1 + L2 with relaxed thresholds
 
+Hits from every tier are fused with **scale-invariant Reciprocal Rank Fusion** (normalized to 0..1), so no single tier can dominate the ranking by raw score magnitude — results corroborated across tiers float to the top.
+
 ### 🔍 Semantic Code Search
 Search your codebase by *meaning*, not just text. Powered by a local `sentence-transformers` model — no OpenAI key needed.
 

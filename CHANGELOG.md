@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.3] - 2026-06-08 ⚖️ SCALE-INVARIANT TIER FUSION
+
+### Fixed
+- **`query()` cross-tier ranking** — L0/L1/L2 hits were merged by raw score, but the tiers use incompatible scales (L0 was a flat `1.0`, L1 a raw unbounded BM25 score, L2 a `0..1` similarity). The flat L0 score routinely outranked more relevant L1/L2 hits, and raw BM25 magnitudes distorted ordering.
+
+### Changed
+- **`_merge_hits` now uses Reciprocal Rank Fusion (RRF)** — ranking depends only on each item's position *within its own tier*, so it is scale-invariant and rewards results corroborated across tiers. The fused value is normalized to `0..1` (1.0 = top-ranked in every contributing tier) so the L2-escalation confidence threshold stays meaningful.
+- Tests: `tests/test_query_router_fusion.py` covering empty/single-bucket, cross-tier corroboration, BM25-magnitude invariance, 0..1 bounds, and representative selection.
+
+### Why
+- `query()` is the primary context-curation entry point. Correct fusion means cheaper models receive the most relevant snippets first instead of whichever tier happened to emit the largest raw number.
+
+---
+
 ## [0.7.2] - 2026-06-08 🕸️ MONOREPO-AWARE IMPORT GRAPH
 
 ### Added
