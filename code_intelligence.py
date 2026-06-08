@@ -419,7 +419,153 @@ def _extract_imports_js(content: str) -> list[str]:
     return imports
 
 
-def _resolve_import_to_file(imp: str, source_file: Path, root: Path, ext: str) -> Path | None:
+# Suffixes tried when resolving a JS/TS import specifier to a concrete file.
+_JS_PROBE_SUFFIXES = (
+    "",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    "/index.ts",
+    "/index.tsx",
+    "/index.js",
+    "/index.jsx",
+)
+
+
+@dataclass
+class _JsResolver:
+    """
+    Pre-computed resolution tables for a JS/TS project, so non-relative imports
+    (tsconfig path aliases and workspace/local package names) can be mapped to
+    real files in the import graph.
+    """
+
+    # (literal_prefix, [absolute target base dirs]) -- longest prefix first.
+    aliases: list[tuple[str, list[Path]]] = field(default_factory=list)
+    # package name (from package.json "name") -> package root directory.
+    packages: dict[str, Path] = field(default_factory=dict)
+    # package name -> declared entry (module/main/types), relative to its dir.
+    package_main: dict[str, str] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        return not self.aliases and not self.packages
+
+
+def _strip_jsonc(text: str) -> str:
+    """Best-effort JSONC -> JSON: drop comments and trailing commas."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    text = re.sub(r"(^|[^:])//[^\n\r]*", lambda m: m.group(1), text)
+    text = re.sub(r",(\s*[}\]])", r"\1", text)
+    return text
+
+
+def _load_jsonc(path: Path) -> dict[str, Any] | None:
+    try:
+        raw = safe_read_text(path)
+    except Exception:
+        return None
+    for candidate in (raw, _strip_jsonc(raw)):
+        try:
+            data = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _split_package(imp: str) -> tuple[str, str]:
+    """Splits a bare specifier into (package_name, subpath)."""
+    parts = imp.split("/")
+    if imp.startswith("@") and len(parts) >= 2:
+        return "/".join(parts[:2]), "/".join(parts[2:])
+    return parts[0], "/".join(parts[1:])
+
+
+def _probe_js_file(base: Path, source_file: Path, root: Path) -> Path | None:
+    """Resolves a base path to an actual JS/TS file by trying known suffixes."""
+    try:
+        root_resolved = root.resolve()
+        src_resolved = source_file.resolve()
+    except Exception:
+        return None
+    base_str = str(base)
+    for suffix in _JS_PROBE_SUFFIXES:
+        try:
+            candidate = Path(base_str + suffix).resolve()
+        except Exception:
+            continue
+        if not candidate.is_file() or candidate == src_resolved:
+            continue
+        try:
+            candidate.relative_to(root_resolved)
+        except ValueError:
+            continue
+        return candidate
+    return None
+
+
+def _build_js_resolver(root: Path) -> _JsResolver:
+    """
+    Scans the project for tsconfig/jsconfig path aliases and local package
+    names (workspaces / monorepo packages) so cross-package and aliased imports
+    become visible to the import graph.
+    """
+    resolver = _JsResolver()
+    alias_entries: list[tuple[str, list[Path]]] = []
+
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not is_dir_ignored(d) and not d.startswith(".")]
+        for fname in files:
+            if fname == "package.json":
+                data = _load_jsonc(Path(dirpath) / fname)
+                if not data:
+                    continue
+                name = data.get("name")
+                if isinstance(name, str) and name and name not in resolver.packages:
+                    resolver.packages[name] = Path(dirpath)
+                    entry = data.get("module") or data.get("main") or data.get("types")
+                    if isinstance(entry, str) and entry:
+                        resolver.package_main[name] = entry
+            elif fname in ("tsconfig.json", "jsconfig.json"):
+                data = _load_jsonc(Path(dirpath) / fname)
+                if not data:
+                    continue
+                co = data.get("compilerOptions")
+                if not isinstance(co, dict):
+                    continue
+                base_url = co.get("baseUrl")
+                base_dir = Path(dirpath) / (base_url if isinstance(base_url, str) else ".")
+                paths = co.get("paths")
+                if not isinstance(paths, dict):
+                    continue
+                for key, targets in paths.items():
+                    if not isinstance(key, str) or not isinstance(targets, list):
+                        continue
+                    prefix = key[:-1] if key.endswith("*") else key
+                    bases = [
+                        base_dir / (t[:-1] if t.endswith("*") else t)
+                        for t in targets
+                        if isinstance(t, str)
+                    ]
+                    if prefix and bases:
+                        alias_entries.append((prefix, bases))
+
+    alias_entries.sort(key=lambda x: len(x[0]), reverse=True)
+    resolver.aliases = alias_entries
+    return resolver
+
+
+def _resolve_import_to_file(
+    imp: str,
+    source_file: Path,
+    root: Path,
+    ext: str,
+    resolver: _JsResolver | None = None,
+) -> Path | None:
     if ext == ".py":
         module_path = imp.replace(".", "/")
         candidates = [
@@ -437,13 +583,41 @@ def _resolve_import_to_file(imp: str, source_file: Path, root: Path, ext: str) -
                 except ValueError:
                     continue
     elif ext in (".js", ".ts", ".jsx", ".tsx"):
-        if not imp.startswith("."):
+        if imp.startswith("."):
+            return _probe_js_file(source_file.parent / imp, source_file, root)
+        if resolver is None:
             return None
-        base = source_file.parent
-        for suffix in ("", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"):
-            candidate = (base / (imp + suffix)).resolve()
-            if candidate.exists() and candidate != source_file.resolve():
-                return candidate
+
+        # 1) tsconfig/jsconfig path aliases (longest prefix wins).
+        for prefix, bases in resolver.aliases:
+            if prefix.endswith("/"):
+                if not imp.startswith(prefix):
+                    continue
+                subpath = imp[len(prefix) :]
+            elif imp != prefix:
+                continue
+            else:
+                subpath = ""
+            for b in bases:
+                hit = _probe_js_file(b / subpath if subpath else b, source_file, root)
+                if hit:
+                    return hit
+
+        # 2) workspace / local package names.
+        pkg, subpath = _split_package(imp)
+        pkg_dir = resolver.packages.get(pkg)
+        if pkg_dir is not None:
+            if subpath:
+                hit = _probe_js_file(pkg_dir / subpath, source_file, root)
+                if hit:
+                    return hit
+            else:
+                main = resolver.package_main.get(pkg)
+                guesses = ([main] if main else []) + ["index", "src/index", "src"]
+                for guess in guesses:
+                    hit = _probe_js_file(pkg_dir / guess, source_file, root)
+                    if hit:
+                        return hit
     return None
 
 
@@ -488,6 +662,7 @@ def invalidate_import_graph_cache() -> None:
 def _build_import_graph_uncached(root: Path, max_files: int = 3000) -> dict[str, list[str]]:
     """Builds import graph without caching."""
     code_files = _iter_code_files(root, max_files=max_files)
+    resolver = _build_js_resolver(root)
     graph: dict[str, list[str]] = {}
 
     for fpath, ext in code_files:
@@ -506,7 +681,7 @@ def _build_import_graph_uncached(root: Path, max_files: int = 3000) -> dict[str,
 
         resolved = set()
         for imp in imports_raw:
-            target = _resolve_import_to_file(imp, fpath, root, ext)
+            target = _resolve_import_to_file(imp, fpath, root, ext, resolver)
             if target:
                 try:
                     resolved.add(str(target.relative_to(root)).replace("\\", "/"))

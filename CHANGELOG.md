@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.2] - 2026-06-08 🕸️ MONOREPO-AWARE IMPORT GRAPH
+
+### Added
+- **JS/TS import resolution for `tsconfig`/`jsconfig` path aliases** (e.g. `@/...`, `@app/...`) — the import graph now maps aliased specifiers to real files instead of silently dropping them.
+- **Workspace / monorepo package resolution** — bare imports of local packages (matched via each `package.json` `"name"`, honoring `module`/`main`/`types` entry points and subpaths) are now edges in the dependency graph.
+- **JSONC-tolerant config parser** — `tsconfig`/`jsconfig` files containing comments and trailing commas are parsed correctly.
+- Tests: `tests/test_import_graph.py` covering relative, alias, workspace, subpath, JSONC, and full-graph resolution.
+
+### Why
+- `analyze_change_impact`, `get_file_relations`, `get_module_cluster`, and `find_dependency_path` previously saw only relative imports, so monorepos and alias-based projects had large blind spots. Cross-package and aliased edges are now visible, improving context-curation quality.
+
+---
+
 ## [0.7.1] - 2026-03-13 🛡️ INDEX PREREQUISITE GUARD
 
 ### Added

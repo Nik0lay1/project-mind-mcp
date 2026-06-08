@@ -64,6 +64,7 @@ Unlike naive text splitters that cut code in the middle of a function, ProjectMi
 - Find related files via shared dependency clustering
 - Discover the shortest path between any two modules
 - Identify entry points and orphaned modules
+- **Monorepo-aware JS/TS resolution** — follows `tsconfig`/`jsconfig` path aliases (`@/...`) and workspace/package imports, not just relative paths
 - **Cached import graph** (120s TTL) — repeated calls return instantly instead of re-scanning the filesystem
 
 ### ⚡ Instant Project Exploration (no indexing needed)
