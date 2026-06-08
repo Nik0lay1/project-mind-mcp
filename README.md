@@ -27,6 +27,7 @@ Save architectural decisions, tech stack notes, and context that survives across
 Hierarchical memory access avoids dumping everything at once:
 - `read_memory_index()` — section headings only (cheap)
 - `read_memory_section(name)` — expand only the section you need
+- `search_memory(query)` — **relevance-ranked** retrieval of the memory blocks most relevant to a task (keyword-scored), not just the head of the file
 
 ### 🪜 3-Tier Hierarchical Search
 Queries escalate through tiers only when the previous one is insufficient — large repositories never trigger a cold load just to answer a path lookup.
@@ -173,7 +174,7 @@ Or run directly for large projects:
 | Category | Tools |
 |---|---|
 | **Session** | `session_init`, `health`, `set_project_root` |
-| **Memory** | `read_memory`, `read_memory_index`, `read_memory_section`, `update_memory`, `clear_memory`, `save_memory_version` |
+| **Memory** | `read_memory`, `read_memory_index`, `read_memory_section`, `search_memory`, `update_memory`, `clear_memory`, `save_memory_version` |
 | **Search** | `query` (tier-aware), `search_codebase`, `search_for_feature`, `search_architecture`, `search_for_errors` |
 | **Exploration** | `get_project_overview`, `explore_directory`, `get_file_summary` |
 | **Dependencies** | `get_file_relations`, `get_dependencies_with_depth`, `get_module_cluster`, `find_dependency_path` |

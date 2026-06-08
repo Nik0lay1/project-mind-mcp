@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.4] - 2026-06-08 🧠 RELEVANCE-RANKED MEMORY
+
+### Added
+- **`search_memory(query, n_results)` tool** — relevance-ranked retrieval over `memory.md`. Splits memory into logical blocks (`## ` sections and `### ` sub-entries) and returns the top-k blocks scored by keyword overlap, instead of returning only the head of the file (the old `read_memory` truncated to the first 100 lines).
+- **`MemoryManager.search_blocks`** — pure, unit-tested scoring core (heading matches weighted higher than body matches, plus a query-coverage bonus).
+- Tests: `tests/test_memory_search.py` covering tokenization, block splitting, scoring, ranking, k-limit, and empty/missing-file cases.
+
+### Why
+- As memory grows, the most relevant decisions/conventions sank below the 100-line read window and became invisible to the model. Targeted retrieval keeps long-lived project knowledge usable without dumping the whole file into context.
+
+---
+
 ## [0.7.3] - 2026-06-08 ⚖️ SCALE-INVARIANT TIER FUSION
 
 ### Fixed

@@ -1774,6 +1774,44 @@ def read_memory(max_lines: int | None = 100) -> str:
 
 
 @mcp.tool()
+def search_memory(query: str, n_results: int = 5) -> str:
+    """
+    Relevance-ranked memory retrieval. Returns the memory blocks most relevant
+    to `query` (scored by keyword overlap) instead of the head of memory.md.
+
+    Use this to pull targeted prior decisions/conventions/notes for the current
+    task without loading the whole memory file.
+
+    Args:
+        query: Free-form text describing what you're looking for.
+        n_results: Maximum number of memory blocks to return (default 5).
+
+    Returns:
+        Markdown with the top matching memory blocks, or a hint if none match.
+    """
+    from memory_manager import MemoryManager
+
+    if not query or not query.strip():
+        return "Error: query cannot be empty."
+
+    mm = MemoryManager()
+    blocks = mm.search_blocks(query, k=max(1, n_results))
+    if not blocks:
+        return (
+            f"No memory blocks matched '{query}'. "
+            "Use `read_memory_index()` to list available sections."
+        )
+
+    out: list[str] = [f"# MEMORY SEARCH: {query}", f"**Matches**: {len(blocks)}", ""]
+    for i, (heading, score, text) in enumerate(blocks, 1):
+        out.append(f"## {i}. {heading} _(score={score:.2f})_")
+        if text:
+            out.append(text)
+        out.append("")
+    return "\n".join(out)
+
+
+@mcp.tool()
 def update_memory(content: str, section: str = "Recent Decisions") -> str:
     # Use direct MemoryManager to avoid vector store initialization
     from memory_manager import MemoryManager

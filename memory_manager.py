@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import threading
 from datetime import datetime
@@ -8,6 +9,59 @@ import config
 from logger import get_logger
 
 logger = get_logger()
+
+
+_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase alphanumeric tokens of length >= 2."""
+    return {tok for tok in _TOKEN_RE.findall(text.lower()) if len(tok) >= 2}
+
+
+def _split_into_blocks(content: str) -> list[tuple[str, str]]:
+    """Splits memory.md into (heading, body) blocks at `## ` / `### ` boundaries."""
+    blocks: list[tuple[str, str]] = []
+    section = ""
+    heading = ""
+    body: list[str] = []
+
+    def flush() -> None:
+        if heading:
+            blocks.append((heading, "\n".join(body).strip()))
+
+    for line in content.split("\n"):
+        if line.startswith("### "):
+            flush()
+            sub = line[4:].strip()
+            heading = f"{section} / {sub}" if section else sub
+            body = []
+        elif line.startswith("## "):
+            flush()
+            section = line[3:].strip()
+            heading = section
+            body = []
+        elif heading:
+            body.append(line)
+    flush()
+    return blocks
+
+
+def _score_block(heading: str, text: str, query_tokens: set[str]) -> float:
+    """Keyword-overlap score: heading matches weigh more, plus a coverage bonus."""
+    if not query_tokens:
+        return 0.0
+    heading_tokens = _tokenize(heading)
+    body_tokens = _tokenize(text)
+    score = 0.0
+    for tok in query_tokens:
+        if tok in heading_tokens:
+            score += 3.0
+        if tok in body_tokens:
+            score += 1.0
+    matched = sum(1 for tok in query_tokens if tok in heading_tokens or tok in body_tokens)
+    score += 2.0 * (matched / len(query_tokens))
+    return score
 
 
 class MemoryManager:
@@ -53,6 +107,44 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Error reading memory: {e}")
             return f"Error reading memory: {e}"
+
+    def search_blocks(self, query: str, k: int = 5) -> list[tuple[str, float, str]]:
+        """
+        Relevance-ranked memory retrieval.
+
+        Splits memory into logical blocks (top-level `## ` sections and their
+        `### ` sub-entries) and returns the top-k blocks scored by keyword
+        overlap with the query, instead of returning only the head of the file.
+
+        Args:
+            query: Free-form text whose tokens are matched against each block.
+            k: Maximum number of blocks to return.
+
+        Returns:
+            List of (heading, score, body) tuples, highest score first.
+        """
+        if not query or not query.strip():
+            return []
+        if not self.memory_file.exists():
+            return []
+        try:
+            with self._lock:
+                content = self.memory_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.error(f"Error searching memory: {e}")
+            return []
+
+        query_tokens = _tokenize(query)
+        if not query_tokens:
+            return []
+
+        scored: list[tuple[str, float, str]] = []
+        for heading, body in _split_into_blocks(content):
+            score = _score_block(heading, body, query_tokens)
+            if score > 0:
+                scored.append((heading, score, body))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[:k]
 
     def update(self, content: str, section: str = "Recent Decisions") -> str:
         """
