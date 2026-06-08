@@ -14,6 +14,7 @@ from config import (
     BINARY_EXTENSIONS,
     CODE_EXTENSIONS,
     INDEXABLE_EXTENSIONS,
+    get_import_graph_max_files,
     is_dir_ignored,
     safe_read_text,
 )
@@ -628,8 +629,15 @@ _import_graph_lock = threading.Lock()
 _GRAPH_CACHE_TTL = 120
 
 
-def build_import_graph(root: Path, max_files: int = 3000) -> dict[str, list[str]]:
-    """Builds a mapping: file_path -> [list of files it imports from]. Cached for 120s."""
+def build_import_graph(root: Path, max_files: int | None = None) -> dict[str, list[str]]:
+    """Builds a mapping: file_path -> [list of files it imports from]. Cached for 120s.
+
+    When ``max_files`` is None the limit comes from
+    ``config.get_import_graph_max_files()`` (env-overridable). The graph is
+    truncated past the limit, so very large repos can raise it explicitly.
+    """
+    if max_files is None:
+        max_files = get_import_graph_max_files()
     global _import_graph_cache, _import_graph_root, _import_graph_time
 
     now = time.monotonic()
@@ -659,9 +667,18 @@ def invalidate_import_graph_cache() -> None:
         _import_graph_time = 0.0
 
 
-def _build_import_graph_uncached(root: Path, max_files: int = 3000) -> dict[str, list[str]]:
+def _build_import_graph_uncached(root: Path, max_files: int | None = None) -> dict[str, list[str]]:
     """Builds import graph without caching."""
+    if max_files is None:
+        max_files = get_import_graph_max_files()
     code_files = _iter_code_files(root, max_files=max_files)
+    if len(code_files) >= max_files:
+        logger.warning(
+            "Import graph truncated at %d files; dependency edges beyond this "
+            "limit are missing. Raise PROJECTMIND_IMPORT_GRAPH_MAX_FILES to "
+            "cover the whole repository.",
+            max_files,
+        )
     resolver = _build_js_resolver(root)
     graph: dict[str, list[str]] = {}
 
@@ -805,7 +822,7 @@ def get_module_cluster(
         Dict mapping file_path -> similarity_score, sorted by score descending
     """
     if graph is None:
-        graph = build_import_graph(root, max_files=3000)
+        graph = build_import_graph(root)
 
     norm_path = file_path.replace("\\", "/")
     if norm_path not in graph:
@@ -858,7 +875,7 @@ def _find_related_tests_from_graph(file_path: str, graph: dict[str, list[str]]) 
 
 def get_file_relations(file_path: str, root: Path) -> str:
     """Returns import relations for a file: imports from, imported by, related tests."""
-    graph = build_import_graph(root, max_files=3000)
+    graph = build_import_graph(root)
 
     norm_path = file_path.replace("\\", "/")
 
@@ -1209,7 +1226,7 @@ def _check_rust_deps(root: Path) -> str | None:
 
 def analyze_change_impact(file_path: str, root: Path) -> str:
     """Analyzes what would be affected if a file changes, using the import graph."""
-    graph = build_import_graph(root, max_files=3000)
+    graph = build_import_graph(root)
     norm_path = file_path.replace("\\", "/")
 
     if norm_path not in graph:

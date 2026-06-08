@@ -121,6 +121,7 @@ CHUNK_OVERLAP = 150
 BATCH_SIZE = 100
 MAX_FILE_SIZE_MB = 10
 MAX_MEMORY_MB = 100
+IMPORT_GRAPH_MAX_FILES = 8000
 
 DEFAULT_IGNORED_DIRS: set[str] = {
     ".git",
@@ -260,6 +261,22 @@ def get_max_memory_bytes() -> int:
         except ValueError:
             pass
     return MAX_MEMORY_MB * 1024 * 1024
+
+
+def get_import_graph_max_files() -> int:
+    """
+    Maximum number of code files scanned when building the import graph.
+    Can be overridden via PROJECTMIND_IMPORT_GRAPH_MAX_FILES environment variable.
+    """
+    env_val = os.getenv("PROJECTMIND_IMPORT_GRAPH_MAX_FILES")
+    if env_val:
+        try:
+            parsed = int(env_val)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    return IMPORT_GRAPH_MAX_FILES
 
 
 def get_ignored_dirs() -> set[str]:

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.6] - 2026-06-08 🕸️ CONFIGURABLE IMPORT-GRAPH CAP
+
+### Changed
+- **Import-graph file limit is now configurable and higher by default** — the dependency graph was hard-capped at 3000 files, so larger monorepos silently lost edges past that point. The default is now `8000` and overridable via `PROJECTMIND_IMPORT_GRAPH_MAX_FILES`.
+- **Truncation is now logged** — when the file cap is hit, `build_import_graph` emits a `WARNING` telling you edges are missing and how to raise the limit, instead of failing silently.
+- `config.get_import_graph_max_files()` is the single source of truth; `build_import_graph` / `_build_import_graph_uncached` default to it when `max_files` is None.
+- Tests: `tests/test_import_graph_cap.py` covering env override, invalid/non-positive fallback, the cap, config default, and truncation warning.
+
+### Why
+- Impact analysis, relations, clustering, and dependency-path search all read this graph. On big repos the silent 3000-file ceiling produced blind spots that degraded context curation; the cap is now visible and tunable.
+
+---
+
 ## [0.7.5] - 2026-06-08 🔎 FULL-FILE L0 SYMBOLS
 
 ### Fixed

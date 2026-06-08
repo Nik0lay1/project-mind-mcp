@@ -235,11 +235,13 @@ All settings in `config.py`:
 | `CHUNK_SIZE` | `1500` | Characters per chunk |
 | `MAX_FILE_SIZE_MB` | `10` | Skip files larger than this |
 | `MAX_MEMORY_MB` | `100` | Memory limit for indexing batch |
+| `IMPORT_GRAPH_MAX_FILES` | `8000` | Max files scanned when building the import graph |
 
 Override via environment variables:
 ```bash
 PROJECTMIND_MAX_FILE_SIZE_MB=5
 PROJECTMIND_MAX_MEMORY_MB=200
+PROJECTMIND_IMPORT_GRAPH_MAX_FILES=20000
 ```
 
 Custom ignore patterns: create `.ai/.indexignore` (same syntax as `.gitignore`).
