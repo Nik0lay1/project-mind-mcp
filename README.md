@@ -68,6 +68,7 @@ Unlike naive text splitters that cut code in the middle of a function, ProjectMi
 - Discover the shortest path between any two modules
 - Identify entry points and orphaned modules
 - **Monorepo-aware JS/TS resolution** — follows `tsconfig`/`jsconfig` path aliases (`@/...`) and workspace/package imports, not just relative paths
+- **Python `src/`-layout & relative-import resolution** — absolute imports resolve through `src/`/`lib/` roots and relative imports (`.`/`..`) walk the correct package levels
 - **Cached import graph** (120s TTL) — repeated calls return instantly instead of re-scanning the filesystem
 
 ### ⚡ Instant Project Exploration (no indexing needed)

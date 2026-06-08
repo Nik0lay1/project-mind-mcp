@@ -560,6 +560,50 @@ def _build_js_resolver(root: Path) -> _JsResolver:
     return resolver
 
 
+_python_roots_cache: dict[str, list[Path]] = {}
+
+
+def _python_search_roots(root: Path) -> list[Path]:
+    """Absolute-import base dirs for a Python project.
+
+    Covers the common ``src/`` layout (and a top-level ``lib/``) in addition to
+    the project root, so ``import mypkg.foo`` resolves to ``src/mypkg/foo.py``.
+    Cached per root.
+    """
+    key = str(root)
+    cached = _python_roots_cache.get(key)
+    if cached is not None:
+        return cached
+    roots = [root]
+    for name in ("src", "lib"):
+        candidate = root / name
+        if candidate.is_dir():
+            roots.append(candidate)
+    _python_roots_cache[key] = roots
+    return roots
+
+
+def _python_import_candidates(imp: str, source_file: Path, root: Path) -> list[Path]:
+    """File candidates for a Python import specifier (absolute or relative)."""
+    if imp.startswith("."):
+        n_dots = len(imp) - len(imp.lstrip("."))
+        rest = imp[n_dots:]
+        base_dir = source_file.parent
+        for _ in range(n_dots - 1):
+            base_dir = base_dir.parent
+        if not rest:
+            return [base_dir / "__init__.py"]
+        sub = rest.replace(".", "/")
+        return [base_dir / (sub + ".py"), base_dir / sub / "__init__.py"]
+
+    module_path = imp.replace(".", "/")
+    candidates: list[Path] = []
+    for base in [source_file.parent, *_python_search_roots(root)]:
+        candidates.append(base / (module_path + ".py"))
+        candidates.append(base / module_path / "__init__.py")
+    return candidates
+
+
 def _resolve_import_to_file(
     imp: str,
     source_file: Path,
@@ -568,13 +612,7 @@ def _resolve_import_to_file(
     resolver: _JsResolver | None = None,
 ) -> Path | None:
     if ext == ".py":
-        module_path = imp.replace(".", "/")
-        candidates = [
-            source_file.parent / (module_path + ".py"),
-            root / (module_path + ".py"),
-            source_file.parent / module_path / "__init__.py",
-            root / module_path / "__init__.py",
-        ]
+        candidates = _python_import_candidates(imp, source_file, root)
         for c in candidates:
             resolved = c.resolve()
             if resolved.exists() and resolved != source_file.resolve():

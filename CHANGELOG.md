@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.7] - 2026-06-08 🐍 PYTHON SRC-LAYOUT & RELATIVE IMPORTS
+
+### Fixed
+- **Python relative imports** (`from .sibling import x`, `from ..pkg import y`, `from . import z`) were resolved by naively replacing dots with slashes, which on a relative specifier produced a drive-absolute path and silently dropped the edge. They now walk up the correct number of package levels from the importing file.
+- **`src/` (and `lib/`) layout** — absolute imports like `import mypkg.foo` in a `src/`-layout project now resolve to `src/mypkg/foo.py`. Previously only the project root was probed, so the entire dependency graph of src-layout packages was invisible.
+
+### Added
+- `_python_search_roots` (cached) and `_python_import_candidates` helpers driving the Python branch of `_resolve_import_to_file`.
+- Tests: `tests/test_python_resolution.py` covering src/lib roots, absolute + package-init resolution, single/double/bare-dot relative imports, root-escape rejection, and unresolvable imports.
+
+### Why
+- The import graph is the backbone of impact analysis, relations, clustering, and dependency-path search. Python is a first-class target, yet relative imports and the ubiquitous `src/` layout were blind spots — closing them materially improves context curation for Python repos.
+
+---
+
 ## [0.7.6] - 2026-06-08 🕸️ CONFIGURABLE IMPORT-GRAPH CAP
 
 ### Changed
