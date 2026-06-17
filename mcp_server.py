@@ -314,7 +314,6 @@ def session_init(project_path: str = "") -> str:
             f"**Project root** (auto-detected): `{config.PROJECT_ROOT}`\n"
             "_Tip: pass `project_path` explicitly to avoid ambiguous auto-detection._"
         )
-
     if is_mcp_server_dir(config.PROJECT_ROOT):
         sections.append(
             "⚠️ The active project root is the MCP server's OWN directory "
@@ -324,9 +323,49 @@ def session_init(project_path: str = "") -> str:
 
     chunks = _count_index_chunks()
     if chunks is None:
-        sections.append("**Index status**: not initialized. Run `index_codebase()` to build it.")
+        # Index DB doesn't exist yet — auto-start background indexing
+        try:
+            from background_indexer import BackgroundIndexer
+            if not BackgroundIndexer.is_running():
+                BackgroundIndexer.start(force=False)
+                sections.append(
+                    "**Index status**: 🔄 Not built yet — background indexing started automatically.\n"
+                    "_Call `get_index_progress()` to track progress._"
+                )
+            else:
+                prog = BackgroundIndexer.get_progress()
+                done = prog.get('files_done', 0)
+                total = prog.get('files_total', 0)
+                sections.append(
+                    f"**Index status**: ⏳ Indexing in progress ({done}/{total} files).\n"
+                    "_Call `get_index_progress()` to track progress._"
+                )
+        except Exception as _e:
+            sections.append(
+                f"**Index status**: not initialized. Run `index_codebase()` to build it. (auto-start failed: {_e})"
+            )
     elif chunks == 0:
-        sections.append("**Index status**: empty. Run `index_codebase(force=True)` to rebuild.")
+        # DB exists but is empty — auto-start if not already running
+        try:
+            from background_indexer import BackgroundIndexer
+            if not BackgroundIndexer.is_running():
+                BackgroundIndexer.start(force=True)
+                sections.append(
+                    "**Index status**: 🔄 Index empty — background re-indexing started automatically.\n"
+                    "_Call `get_index_progress()` to track progress._"
+                )
+            else:
+                prog = BackgroundIndexer.get_progress()
+                done = prog.get('files_done', 0)
+                total = prog.get('files_total', 0)
+                sections.append(
+                    f"**Index status**: ⏳ Re-indexing in progress ({done}/{total} files).\n"
+                    "_Call `get_index_progress()` to track progress._"
+                )
+        except Exception as _e:
+            sections.append(
+                f"**Index status**: empty. Run `index_codebase(force=True)` to rebuild. (auto-start failed: {_e})"
+            )
     else:
         sections.append(f"**Index status**: {chunks} chunks (loaded lazily).")
 
@@ -1839,40 +1878,113 @@ def delete_memory_section(section_name: str) -> str:
 
 
 @mcp.tool()
-def index_codebase(force: bool = False) -> str:
+def index_codebase(force: bool = False, background: bool = True) -> str:
     """
     Indexes the entire codebase for semantic search.
 
     Limited to 5000 files per operation. For large codebases use index_changed_files() instead.
 
+    By default runs in **background** mode: returns immediately with a project
+    structure overview while the heavy embedding work continues in a daemon thread.
+    Call `get_index_progress()` to poll completion status.
+
     Args:
-        force: If True, clears existing index before indexing
+        force: If True, clears existing index before indexing.
+        background: If True (default), runs indexing in a background thread and
+                    returns immediately with a project overview. If False, blocks
+                    until indexing is fully complete (old behaviour — may timeout
+                    on large codebases).
 
     Returns:
-        Status message with indexing stats
+        - background=True:  instant project structure overview + status line
+        - background=False: final indexing stats string
     """
-    from code_intelligence import invalidate_import_graph_cache
-
-    ctx = get_context()
-    if ctx.vector_store.get_collection() is None:
-        return "Failed to initialize vector store."
-
     root_dir = config.PROJECT_ROOT
-    warning = ""
+    warn_own_dir = ""
     if is_mcp_server_dir(root_dir):
-        warning = (
+        warn_own_dir = (
             "⚠️ Warning: indexing the ProjectMind MCP server's OWN directory "
             f"({root_dir}). If this was not intended, call "
             "`set_project_root('<absolute path to your project>')` first, "
             "then re-run `index_codebase`.\n\n"
         )
 
+    # ── Background mode (default) ────────────────────────────────────────────
+    if background:
+        from background_indexer import BackgroundIndexer
+
+        if BackgroundIndexer.is_running():
+            prog = BackgroundIndexer.get_progress()
+            done = prog.get('files_done', 0)
+            total = prog.get('files_total', 0)
+            pct = int(done / total * 100) if total else 0
+            return (
+                f"{warn_own_dir}"
+                f"⏳ Background indexing already in progress: {done}/{total} files ({pct}%).\n"
+                "Call `get_index_progress()` to monitor, or use `index_codebase(background=False)` "
+                "to wait for completion."
+            )
+
+        # Collect instant project structure before starting the heavy work
+        structure_lines: list[str] = [f"# Indexing started for `{root_dir}`\n"]
+        try:
+            from manifest import get_or_build_manifest, quick_overview_from_manifest
+            m = get_or_build_manifest()
+            structure_lines.append(
+                f"## Project Structure (instant)\n"
+                f"- **{m.stats.indexed_files}** indexable files / {m.stats.total_files} total\n"
+                f"- **{m.stats.total_size_bytes / (1024 * 1024):.1f} MB** total\n"
+                f"- Top modules: " + ", ".join(f"`{mod.name}/`" for mod in m.modules[:8])
+            )
+            structure_lines.append("### Overview\n" + quick_overview_from_manifest(m))
+        except Exception as _e:
+            structure_lines.append(f"_Structure overview unavailable: {_e}_")
+
+        started = BackgroundIndexer.start(force=force)
+        status = "started" if started else "already running"
+        structure_lines.append(
+            f"\n---\n⏳ **Background indexing {status}.**\n"
+            "Call `get_index_progress()` to check status and watch files being indexed.\n"
+            "When done, `search_codebase()` and `search_for_feature()` will be available."
+        )
+        return warn_own_dir + "\n\n".join(structure_lines)
+
+    # ── Synchronous mode (background=False) — legacy blocking behaviour ──────
+    from code_intelligence import invalidate_import_graph_cache
+
+    ctx = get_context()
+    if ctx.vector_store.get_collection() is None:
+        return "Failed to initialize vector store."
+
     ignored_dirs = get_ignored_dirs()
     ignore_patterns = load_index_ignore_patterns()
 
     result = ctx.indexer.index_all(root_dir, ignored_dirs, ignore_patterns, force)
     invalidate_import_graph_cache()
-    return warning + result
+    return warn_own_dir + result
+
+
+@mcp.tool()
+def get_index_progress() -> str:
+    """
+    Returns the current status of a background indexing operation started by
+    `index_codebase()` (with background=True, which is the default).
+
+    Statuses:
+      - **idle**              — no indexing job has been run yet
+      - **scanning**          — discovering indexable files (fast, ~1 s)
+      - **initializing_model**— loading SentenceTransformer model (30–60 s first run)
+      - **indexing**          — embedding and storing file chunks
+      - **finalizing**        — flushing buffers and rebuilding BM25 index
+      - **done**              — indexing complete, search tools are ready
+      - **error**             — indexing failed (see `last_error` field)
+
+    Returns:
+        Markdown-formatted progress report with file counts, percentage, and ETA.
+    """
+    from background_indexer import BackgroundIndexer, format_progress_markdown
+    data = BackgroundIndexer.get_progress()
+    return format_progress_markdown(data)
 
 
 @mcp.tool()

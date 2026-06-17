@@ -1,0 +1,1 @@
+f:\Projects\09012026\MCP\.venv\Scripts\python.exe f:\Projects\09012026\MCP\mcp_server.py 2> f:\Projects\09012026\MCP\error_log.txt

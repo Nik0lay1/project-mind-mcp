@@ -49,7 +49,21 @@ DAEMON_TICK_SECONDS = 30
 DB_COMPACTION_THRESHOLD_MB = 200
 DB_HARD_LIMIT_MB = 800  # Above this, trigger emergency reindex suggestion
 LOG_TRUNCATE_THRESHOLD_MB = 8
-MODEL_IDLE_UNLOAD_SECONDS = 15 * 60  # 15 min idle => unload model
+
+
+def _env_int(key: str, default: int) -> int:
+    """Read an integer from environment or return default."""
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        parsed = int(val)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+MODEL_IDLE_UNLOAD_SECONDS = _env_int("PROJECTMIND_MODEL_IDLE_UNLOAD_SECONDS", 60 * 60)  # 1 h
 MEMORY_PRESSURE_THRESHOLD_MB = 500  # process RSS above which we drop caches
 
 

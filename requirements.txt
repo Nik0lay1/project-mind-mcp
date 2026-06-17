@@ -3,3 +3,4 @@ chromadb
 sentence-transformers
 langchain-text-splitters
 GitPython
+numpy<2.0

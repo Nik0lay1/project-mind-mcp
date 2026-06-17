@@ -27,6 +27,7 @@ MAX_FILES_PER_INDEX = 5000
 PROGRESS_REPORT_INTERVAL = 100
 
 BatchUpsertCallback = Callable[[list[str], list[dict], list[str]], None]
+ProgressCallback = Callable[[int, int], None]  # (files_done, files_total)
 
 
 class CodebaseIndexer:
@@ -193,7 +194,12 @@ class CodebaseIndexer:
             return False
 
     def index_all(
-        self, root_dir: Path, ignored_dirs: set[str], ignore_patterns: set[str], force: bool = False
+        self,
+        root_dir: Path,
+        ignored_dirs: set[str],
+        ignore_patterns: set[str],
+        force: bool = False,
+        progress_callback: "ProgressCallback | None" = None,
     ) -> str:
         """
         Indexes entire codebase.
@@ -203,6 +209,9 @@ class CodebaseIndexer:
             ignored_dirs: Directories to skip
             ignore_patterns: File patterns to ignore
             force: If True, clears existing index first
+            progress_callback: Optional callable(files_done, files_total) invoked
+                every PROGRESS_REPORT_INTERVAL files so callers (e.g.
+                BackgroundIndexer) can track live progress without polling.
 
         Returns:
             Status message with indexing stats
@@ -228,12 +237,17 @@ class CodebaseIndexer:
 
         file_count = 0
 
-        for file_path in indexable_files:
+        for i, file_path in enumerate(indexable_files):
             if self.process_file_to_chunks(file_path, indexer):
                 file_count += 1
             # Progress reporting
             if file_count % PROGRESS_REPORT_INTERVAL == 0:
                 logger.info(f"Progress: {file_count}/{len(indexable_files)} files processed...")
+                if progress_callback is not None:
+                    try:
+                        progress_callback(i + 1, len(indexable_files))
+                    except Exception:
+                        pass
 
         indexer.flush()
 
@@ -247,7 +261,11 @@ class CodebaseIndexer:
         return f"Indexed {file_count} files ({stats['total_chunks']} chunks in {stats['total_batches']} batches){warning}."
 
     def index_changed(
-        self, root_dir: Path, ignored_dirs: set[str], ignore_patterns: set[str]
+        self,
+        root_dir: Path,
+        ignored_dirs: set[str],
+        ignore_patterns: set[str],
+        progress_callback: "ProgressCallback | None" = None,
     ) -> str:
         """
         Indexes only changed files (incremental indexing).
@@ -256,6 +274,8 @@ class CodebaseIndexer:
             root_dir: Root directory to scan
             ignored_dirs: Directories to skip
             ignore_patterns: File patterns to ignore
+            progress_callback: Optional callable(files_done, files_total) invoked
+                every PROGRESS_REPORT_INTERVAL files.
 
         Returns:
             Status message with indexing stats
@@ -276,12 +296,17 @@ class CodebaseIndexer:
         )
         file_count = 0
 
-        for file_path in changed_files:
+        for i, file_path in enumerate(changed_files):
             if self.process_file_with_metadata(file_path, indexer, metadata):
                 file_count += 1
             # Progress reporting
             if file_count % PROGRESS_REPORT_INTERVAL == 0:
                 logger.info(f"Progress: {file_count}/{len(changed_files)} files processed...")
+                if progress_callback is not None:
+                    try:
+                        progress_callback(i + 1, len(changed_files))
+                    except Exception:
+                        pass
 
         indexer.flush()
 
