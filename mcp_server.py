@@ -118,21 +118,18 @@ mcp = FastMCP("ProjectMind")
 
 
 def _check_model_loaded() -> str | None:
-    """Returns an error message if the embedding model is not loaded, or None if OK.
+    """Ensures the embedding model is loaded, initializing it if needed.
 
     Must be called *after* _check_index_ready() (which confirms the SQLite DB exists).
-    Avoids triggering slow model initialization inside a time-bounded MCP tool call.
     """
     try:
         vs = get_context().vector_store
         if not vs.is_loaded():
-            return (
-                "⚠️ EMBEDDING MODEL NOT LOADED. The vector index exists but the model "
-                "is not in memory yet (server may have restarted).\n"
-                "Run `index_codebase()` once to reload it, then retry this tool."
-            )
-    except Exception:
-        pass
+            log("Embedding model not loaded yet. Initializing now...")
+            if not vs.initialize():
+                return "⚠️ Failed to initialize the embedding model vector store."
+    except Exception as e:
+        return f"⚠️ Error initializing embedding model: {e}"
     return None
 
 
@@ -369,19 +366,25 @@ def session_init(project_path: str = "") -> str:
     else:
         sections.append(f"**Index status**: {chunks} chunks (loaded lazily).")
 
-    # Manifest (L0) — fast, no model load.
+    # Manifest (L0) — load existing from disk, do not build synchronously.
     try:
-        from manifest import get_or_build_manifest, quick_overview_from_manifest
+        from manifest import load_manifest, quick_overview_from_manifest
 
-        m = get_or_build_manifest()
-        sections.append(
-            "## Manifest\n"
-            f"- {m.stats.indexed_files} indexable files / {m.stats.total_files} total\n"
-            f"- {m.stats.total_size_bytes / (1024 * 1024):.1f} MB, "
-            f"refreshed in {m.duration_ms} ms\n"
-            f"- top modules: " + ", ".join(f"`{mod.name}/`" for mod in m.modules[:5])
-        )
-        sections.append("### Quick overview\n" + quick_overview_from_manifest(m))
+        m = load_manifest()
+        if m:
+            sections.append(
+                "## Manifest\n"
+                f"- {m.stats.indexed_files} indexable files / {m.stats.total_files} total\n"
+                f"- {m.stats.total_size_bytes / (1024 * 1024):.1f} MB, "
+                f"refreshed in {m.duration_ms} ms\n"
+                f"- top modules: " + ", ".join(f"`{mod.name}/`" for mod in m.modules[:5])
+            )
+            sections.append("### Quick overview\n" + quick_overview_from_manifest(m))
+        else:
+            sections.append(
+                "## Manifest\n"
+                "_Manifest not built yet. It is being built in the background..._"
+            )
     except Exception as e:
         sections.append(f"## Manifest\n_skipped: {e}_")
 
@@ -524,10 +527,13 @@ def get_project_overview() -> str:
         # Manifest first — closes ~80% of "what is this project" questions
         # in <50 ms without touching the vector store.
         try:
-            from manifest import get_or_build_manifest, quick_overview_from_manifest
+            from manifest import load_manifest, quick_overview_from_manifest
 
-            m = get_or_build_manifest()
-            quick = quick_overview_from_manifest(m)
+            m = load_manifest()
+            if m:
+                quick = quick_overview_from_manifest(m)
+            else:
+                quick = "_Manifest not built yet. It is being built in the background..._"
         except Exception:
             quick = ""
 
@@ -1928,15 +1934,21 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
         # Collect instant project structure before starting the heavy work
         structure_lines: list[str] = [f"# Indexing started for `{root_dir}`\n"]
         try:
-            from manifest import get_or_build_manifest, quick_overview_from_manifest
-            m = get_or_build_manifest()
-            structure_lines.append(
-                f"## Project Structure (instant)\n"
-                f"- **{m.stats.indexed_files}** indexable files / {m.stats.total_files} total\n"
-                f"- **{m.stats.total_size_bytes / (1024 * 1024):.1f} MB** total\n"
-                f"- Top modules: " + ", ".join(f"`{mod.name}/`" for mod in m.modules[:8])
-            )
-            structure_lines.append("### Overview\n" + quick_overview_from_manifest(m))
+            from manifest import load_manifest, quick_overview_from_manifest
+            m = load_manifest()
+            if m:
+                structure_lines.append(
+                    f"## Project Structure (instant)\n"
+                    f"- **{m.stats.indexed_files}** indexable files / {m.stats.total_files} total\n"
+                    f"- **{m.stats.total_size_bytes / (1024 * 1024):.1f} MB** total\n"
+                    f"- Top modules: " + ", ".join(f"`{mod.name}/`" for mod in m.modules[:8])
+                )
+                structure_lines.append("### Overview\n" + quick_overview_from_manifest(m))
+            else:
+                structure_lines.append(
+                    "## Project Structure (instant)\n"
+                    "_Manifest not built yet. It is being built in the background..._"
+                )
         except Exception as _e:
             structure_lines.append(f"_Structure overview unavailable: {_e}_")
 

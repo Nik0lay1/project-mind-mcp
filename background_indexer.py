@@ -198,10 +198,20 @@ class BackgroundIndexer:
     @classmethod
     def _do_index(cls, root_dir: Path, force: bool) -> None:
         """Actual indexing logic — called from _run()."""
-        from config import get_ignored_dirs
-        from codebase_indexer import CodebaseIndexer
-        from incremental_indexing import IndexMetadata
         from code_intelligence import invalidate_import_graph_cache
+        from codebase_indexer import CodebaseIndexer
+        from config import get_ignored_dirs
+        from incremental_indexing import IndexMetadata
+
+        # Build and save the manifest in the background thread first
+        try:
+            from manifest import build_manifest, save_manifest
+            logger.info("BackgroundIndexer: building project manifest...")
+            manifest = build_manifest(root_dir)
+            save_manifest(manifest)
+            logger.info("BackgroundIndexer: project manifest built and saved successfully")
+        except Exception as e:
+            logger.warning(f"BackgroundIndexer: failed to build manifest: {e}")
 
         # ── Phase 1: scan files ─────────────────────────────────────────────
         ignored_dirs = get_ignored_dirs()
@@ -259,7 +269,7 @@ class BackgroundIndexer:
         # ── Phase 3: index files in batches ─────────────────────────────────
         cls._update(status="indexing", phase="embedding")
 
-        from config import get_max_memory_bytes, BATCH_SIZE
+        from config import BATCH_SIZE, get_max_memory_bytes
         from memory_limited_indexer import MemoryLimitedIndexer
 
         max_memory = get_max_memory_bytes()
@@ -350,13 +360,14 @@ def _scan_files(
 ) -> list[Path]:
     """Thin wrapper around CodebaseIndexer.scan_indexable_files without
     needing a full VectorStoreManager (avoids model load)."""
+    import os
+
     from config import (
         BINARY_EXTENSIONS,
         INDEXABLE_EXTENSIONS,
         get_max_file_size_bytes,
         is_dir_ignored,
     )
-    import os
 
     indexable_files: list[Path] = []
     max_files = 20000

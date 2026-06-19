@@ -17,6 +17,13 @@ Every time you start a new AI session, your assistant forgets everything about y
 - **Dependency graph analysis** to understand how modules connect
 - **Works 100% locally** — your code never leaves your machine
 
+### What's new in v0.3.0
+
+- **feat: Symbol Graph** — новий модуль `symbol_graph.py` будує AST-рівневий граф викликів, успадкувань та імплементацій інтерфейсів між символами (функції, класи, методи) для Python, JavaScript, TypeScript, Go, Java, Rust, Ruby. Ліниво завантажується через `context.get_symbol_graph()`.
+- **refactor: Manifest decoupling** — маніфест більше не будується синхронно; `load_manifest()` читає з диска, а `build_manifest()` викликається у фоновому індексаторі.
+- **perf: Background embedding preload** — модель sentence-transformers завантажується у фоновому потоці при першому виклику `get_context()`, усуваючи холодний старт при першому пошуковому запиті.
+- **fix: Thread-safe initialization** — `vector_store_manager.initialize()` тепер коректно захищений `threading.Lock` проти race condition.
+
 ---
 
 ## Features

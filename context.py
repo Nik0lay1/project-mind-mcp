@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from codebase_indexer import CodebaseIndexer
     from git_utils import GitRepository
     from memory_manager import MemoryManager
+    from symbol_graph import SymbolGraph
     from vector_store_manager import VectorStoreManager
 
 
@@ -21,6 +22,7 @@ class AppContext:
     memory_manager: "MemoryManager"
     indexer: "CodebaseIndexer"
     git_repo: "GitRepository | None" = None
+    _symbol_graph: "SymbolGraph | None" = None
 
     @classmethod
     def create_default(cls) -> "AppContext":
@@ -51,6 +53,21 @@ class AppContext:
             git_repo=git_repo,
         )
 
+    def get_symbol_graph(self) -> "SymbolGraph":
+        """
+        Returns the SymbolGraph, building it lazily if not yet loaded.
+
+        The symbol graph provides AST-level call / inherit / implement
+        relationships between symbols (functions, classes, methods).
+
+        Returns:
+            SymbolGraph instance (may be empty if build fails).
+        """
+        if self._symbol_graph is None:
+            from symbol_graph import get_or_build_symbol_graph
+            self._symbol_graph = get_or_build_symbol_graph(force=False)
+        return self._symbol_graph
+
 
 _app_context: AppContext | None = None
 
@@ -69,6 +86,22 @@ def get_context() -> AppContext:
 
         ensure_startup()
         _app_context = AppContext.create_default()
+
+        # Load embedding model in background so it is ready for queries
+        import threading
+
+        from logger import setup_logger
+        logger = setup_logger()
+
+        def load_model_bg(ctx: AppContext):
+            try:
+                logger.info("Starting background loading of embedding model...")
+                ctx.vector_store.initialize()
+            except Exception as e:
+                logger.error(f"Failed to initialize vector store in background: {e}")
+
+        threading.Thread(target=load_model_bg, args=(_app_context,), daemon=True).start()
+
     return _app_context
 
 
@@ -88,3 +121,9 @@ def reset_context() -> None:
     """Resets the global context to None. Useful for testing."""
     global _app_context
     _app_context = None
+    # Also invalidate symbol graph cache
+    try:
+        from symbol_graph import invalidate_symbol_graph_cache
+        invalidate_symbol_graph_cache()
+    except ImportError:
+        pass

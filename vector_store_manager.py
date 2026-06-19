@@ -35,6 +35,8 @@ class VectorStoreManager:
         self._last_query_at: float = 0.0
         self._loaded_at: float = 0.0
         self._time = _time
+        import threading
+        self._init_lock = threading.Lock()
 
     def is_loaded(self) -> bool:
         """Returns True iff the embedding model + collection are currently loaded.
@@ -67,39 +69,43 @@ class VectorStoreManager:
         if self._initialized and self.collection is not None:
             return True
 
-        logger.info("Initializing Vector Store (this may take 30-60 seconds on first run)...")
+        with self._init_lock:
+            if self._initialized and self.collection is not None:
+                return True
 
-        try:
-            import chromadb
-            from chromadb.utils import embedding_functions
-            from sentence_transformers import SentenceTransformer
+            logger.info("Initializing Vector Store (this may take 30-60 seconds on first run)...")
 
-            class LocalSentenceTransformerEmbeddingFunction(embedding_functions.EmbeddingFunction):  # type: ignore[type-arg]
-                def __init__(self, model_name: str) -> None:
-                    logger.info(f"Loading SentenceTransformer model '{model_name}'...")
-                    self.model = SentenceTransformer(model_name)
-                    logger.info("Model loaded successfully")
+            try:
+                import chromadb
+                from chromadb.utils import embedding_functions
+                from sentence_transformers import SentenceTransformer
 
-                def __call__(self, input: list[str]) -> list[list[float]]:  # type: ignore[override]
-                    return self.model.encode(input).tolist()  # type: ignore[return-value]
+                class LocalSentenceTransformerEmbeddingFunction(embedding_functions.EmbeddingFunction):  # type: ignore[type-arg]
+                    def __init__(self, model_name: str) -> None:
+                        logger.info(f"Loading SentenceTransformer model '{model_name}'...")
+                        self.model = SentenceTransformer(model_name)
+                        logger.info("Model loaded successfully")
 
-            self.chroma_client = chromadb.PersistentClient(path=str(config.VECTOR_STORE_DIR))
-            logger.info("ChromaDB client initialized")
-            self.embedding_fn = LocalSentenceTransformerEmbeddingFunction(config.MODEL_NAME)
-            self.collection = self.chroma_client.get_or_create_collection(
-                name=self.collection_name,
-                embedding_function=self.embedding_fn,
-                metadata={"hnsw:space": "cosine"},
-            )
+                    def __call__(self, input: list[str]) -> list[list[float]]:  # type: ignore[override]
+                        return self.model.encode(input).tolist()  # type: ignore[return-value]
 
-            self._initialized = True
-            self._loaded_at = self._time.time()
-            logger.info("Vector Store initialized successfully")
-            self._bm25_index.load()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
-            return False
+                self.chroma_client = chromadb.PersistentClient(path=str(config.VECTOR_STORE_DIR))
+                logger.info("ChromaDB client initialized")
+                self.embedding_fn = LocalSentenceTransformerEmbeddingFunction(config.MODEL_NAME)
+                self.collection = self.chroma_client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_fn,
+                    metadata={"hnsw:space": "cosine"},
+                )
+
+                self._initialized = True
+                self._loaded_at = self._time.time()
+                logger.info("Vector Store initialized successfully")
+                self._bm25_index.load()
+                return True
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
+                return False
 
     def get_collection(self) -> Any:
         """

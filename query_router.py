@@ -92,10 +92,13 @@ class QueryResult:
 
 
 def _tier_l0(query: str, n: int) -> list[QueryHit]:
-    from manifest import find_files_by_keyword, get_or_build_manifest
+    from manifest import find_files_by_keyword, load_manifest
 
     try:
-        m = get_or_build_manifest()
+        m = load_manifest()
+        if not m:
+            logger.info("L0 manifest not loaded or stale — skipping L0 query tier")
+            return []
     except Exception as e:
         logger.warning(f"L0 manifest load failed: {e}")
         return []
