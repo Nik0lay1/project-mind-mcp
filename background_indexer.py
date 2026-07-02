@@ -45,6 +45,7 @@ def _progress_path() -> Path:
 # Progress helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_progress(data: dict[str, Any]) -> None:
     """Atomically persist progress dict to disk."""
     try:
@@ -68,6 +69,7 @@ def _read_progress() -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Singleton BackgroundIndexer
 # ---------------------------------------------------------------------------
+
 
 class BackgroundIndexer:
     """
@@ -216,6 +218,7 @@ class BackgroundIndexer:
         # Build and save the manifest in the background thread first
         try:
             from manifest import build_manifest, save_manifest
+
             logger.info("BackgroundIndexer: building project manifest...")
             manifest = build_manifest(root_dir)
             save_manifest(manifest)
@@ -236,6 +239,7 @@ class BackgroundIndexer:
             return
 
         from codebase_indexer import MAX_FILES_PER_INDEX
+
         total_files = len(indexable_files)
         if total_files > MAX_FILES_PER_INDEX:
             logger.warning(
@@ -251,6 +255,7 @@ class BackgroundIndexer:
 
         # ── Phase 2: initialise vector store (loads SentenceTransformer) ────
         from context import get_context
+
         ctx = get_context()
 
         # Initialise BEFORE clearing: clear_collection on a cold client would
@@ -288,6 +293,7 @@ class BackgroundIndexer:
 
         file_count = 0
         import time as _time
+
         t_start = _time.monotonic()
 
         for i, file_path in enumerate(indexable_files):
@@ -341,9 +347,7 @@ class BackgroundIndexer:
             for removed_path in removed:
                 ctx.vector_store.delete_by_source(removed_path)
             if removed:
-                logger.info(
-                    f"BackgroundIndexer: removed chunks of {len(removed)} deleted files"
-                )
+                logger.info(f"BackgroundIndexer: removed chunks of {len(removed)} deleted files")
         metadata.save()
 
         logger.info("BackgroundIndexer: rebuilding BM25 index...")
@@ -379,6 +383,7 @@ class BackgroundIndexer:
 # ---------------------------------------------------------------------------
 # Helpers used only inside this module
 # ---------------------------------------------------------------------------
+
 
 def _scan_files(
     root_dir: Path,
@@ -498,9 +503,7 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
             "\n✅ Indexing complete! You can now use `search_codebase()` for semantic search."
         )
     elif status == "initializing_model":
-        lines.append(
-            "\n_Loading SentenceTransformer model — this takes 30–60 s on first run._"
-        )
+        lines.append("\n_Loading SentenceTransformer model — this takes 30–60 s on first run._")
     elif status in ("scanning", "indexing", "finalizing"):
         lines.append("\n_Call `get_index_progress()` again to refresh._")
 

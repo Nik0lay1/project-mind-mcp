@@ -67,6 +67,7 @@ class AppContext:
         with _symbol_graph_lock:
             if self._symbol_graph is None:
                 from symbol_graph import get_or_build_symbol_graph
+
                 self._symbol_graph = get_or_build_symbol_graph(force=False)
             return self._symbol_graph
 
@@ -100,9 +101,10 @@ def get_context() -> AppContext:
 
             # Load embedding model in background so it is ready for queries
             from logger import setup_logger
+
             logger = setup_logger()
 
-            def load_model_bg(ctx: AppContext):
+            def load_model_bg(ctx: AppContext) -> None:
                 try:
                     logger.info("Starting background loading of embedding model...")
                     ctx.vector_store.initialize()
@@ -133,6 +135,7 @@ def reset_context() -> None:
     # Also invalidate symbol graph cache
     try:
         from symbol_graph import invalidate_symbol_graph_cache
+
         invalidate_symbol_graph_cache()
     except ImportError:
         pass

@@ -271,9 +271,7 @@ class FileCache:
                 # cannot grow unboundedly over a long-lived server process.
                 if len(self.mtime_cache) > self.lru_cache.capacity * 2:
                     live = set(self.lru_cache.cache.keys())
-                    self.mtime_cache = {
-                        k: v for k, v in self.mtime_cache.items() if k in live
-                    }
+                    self.mtime_cache = {k: v for k, v in self.mtime_cache.items() if k in live}
         except Exception as e:
             logger.debug(f"Error caching file {file_path}: {e}")
 

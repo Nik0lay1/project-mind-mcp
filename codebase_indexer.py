@@ -57,9 +57,7 @@ class CodebaseIndexer:
             self.vector_store = vector_store
             self.failed = False
 
-        def __call__(
-            self, documents: list[str], metadatas: list[dict], ids: list[str]
-        ) -> None:
+        def __call__(self, documents: list[str], metadatas: list[dict], ids: list[str]) -> None:
             for i in range(0, len(documents), BATCH_SIZE):
                 end = min(i + BATCH_SIZE, len(documents))
                 ok = self.vector_store.upsert(
@@ -414,9 +412,7 @@ class CodebaseIndexer:
             if removed:
                 logger.info(f"Removed chunks of {len(removed)} deleted files from the index")
         else:
-            logger.warning(
-                f"File scan hit the {scan_cap}-file cap; skipping deleted-file pruning"
-            )
+            logger.warning(f"File scan hit the {scan_cap}-file cap; skipping deleted-file pruning")
 
         metadata.save()
 

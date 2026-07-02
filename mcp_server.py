@@ -394,6 +394,7 @@ def session_init(project_path: str = "") -> str:
         # Index DB doesn't exist yet — auto-start background indexing
         try:
             from background_indexer import BackgroundIndexer
+
             if not BackgroundIndexer.is_running():
                 BackgroundIndexer.start(force=False)
                 sections.append(
@@ -402,8 +403,8 @@ def session_init(project_path: str = "") -> str:
                 )
             else:
                 prog = BackgroundIndexer.get_progress()
-                done = prog.get('files_done', 0)
-                total = prog.get('files_total', 0)
+                done = prog.get("files_done", 0)
+                total = prog.get("files_total", 0)
                 sections.append(
                     f"**Index status**: ⏳ Indexing in progress ({done}/{total} files).\n"
                     "_Call `get_index_progress()` to track progress._"
@@ -416,6 +417,7 @@ def session_init(project_path: str = "") -> str:
         # DB exists but is empty — auto-start if not already running
         try:
             from background_indexer import BackgroundIndexer
+
             if not BackgroundIndexer.is_running():
                 BackgroundIndexer.start(force=True)
                 sections.append(
@@ -424,8 +426,8 @@ def session_init(project_path: str = "") -> str:
                 )
             else:
                 prog = BackgroundIndexer.get_progress()
-                done = prog.get('files_done', 0)
-                total = prog.get('files_total', 0)
+                done = prog.get("files_done", 0)
+                total = prog.get("files_total", 0)
                 sections.append(
                     f"**Index status**: ⏳ Re-indexing in progress ({done}/{total} files).\n"
                     "_Call `get_index_progress()` to track progress._"
@@ -453,8 +455,7 @@ def session_init(project_path: str = "") -> str:
             sections.append("### Quick overview\n" + quick_overview_from_manifest(m))
         else:
             sections.append(
-                "## Manifest\n"
-                "_Manifest not built yet. It is being built in the background..._"
+                "## Manifest\n" "_Manifest not built yet. It is being built in the background..._"
             )
     except Exception as e:
         sections.append(f"## Manifest\n_skipped: {e}_")
@@ -2106,8 +2107,8 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
 
         if BackgroundIndexer.is_running():
             prog = BackgroundIndexer.get_progress()
-            done = prog.get('files_done', 0)
-            total = prog.get('files_total', 0)
+            done = prog.get("files_done", 0)
+            total = prog.get("files_total", 0)
             pct = int(done / total * 100) if total else 0
             return (
                 f"{warn_own_dir}"
@@ -2120,6 +2121,7 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
         structure_lines: list[str] = [f"# Indexing started for `{root_dir}`\n"]
         try:
             from manifest import load_manifest, quick_overview_from_manifest
+
             m = load_manifest()
             if m:
                 structure_lines.append(
@@ -2180,6 +2182,7 @@ def get_index_progress() -> str:
         Markdown-formatted progress report with file counts, percentage, and ETA.
     """
     from background_indexer import BackgroundIndexer, format_progress_markdown
+
     data = BackgroundIndexer.get_progress()
     return format_progress_markdown(data)
 

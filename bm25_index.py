@@ -103,9 +103,7 @@ class BM25Index:
             if not self._ids:
                 return False
             keep = [
-                i
-                for i, meta in enumerate(self._metadatas)
-                if (meta or {}).get("source") != source
+                i for i, meta in enumerate(self._metadatas) if (meta or {}).get("source") != source
             ]
             if len(keep) != len(self._ids):
                 self._ids = [self._ids[i] for i in keep]

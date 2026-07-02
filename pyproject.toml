@@ -118,6 +118,11 @@ module = [
     "codebase_indexer",
     "bm25_index",
     "cache_manager",
+    "symbol_graph",
+    "background_indexer",
+    "manifest",
+    "maintenance",
+    "query_router",
 ]
 ignore_errors = true
 

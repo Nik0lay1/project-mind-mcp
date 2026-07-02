@@ -491,26 +491,122 @@ def _get_implements_interfaces(class_node: Any, source: bytes) -> list[str]:
 _COMMON_BUILTIN_CALLS: frozenset[str] = frozenset(
     {
         # Python builtins
-        "print", "len", "str", "int", "float", "bool", "list", "dict", "set",
-        "tuple", "frozenset", "range", "enumerate", "zip", "map", "filter",
-        "sorted", "reversed", "isinstance", "issubclass", "hasattr", "getattr",
-        "setattr", "delattr", "super", "type", "repr", "id", "min", "max",
-        "sum", "abs", "round", "open", "iter", "next", "format", "vars", "dir",
-        "callable", "hash", "input", "property", "staticmethod", "classmethod",
+        "print",
+        "len",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "range",
+        "enumerate",
+        "zip",
+        "map",
+        "filter",
+        "sorted",
+        "reversed",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "delattr",
+        "super",
+        "type",
+        "repr",
+        "id",
+        "min",
+        "max",
+        "sum",
+        "abs",
+        "round",
+        "open",
+        "iter",
+        "next",
+        "format",
+        "vars",
+        "dir",
+        "callable",
+        "hash",
+        "input",
+        "property",
+        "staticmethod",
+        "classmethod",
         # common method-call noise
-        "append", "extend", "insert", "remove", "pop", "clear", "copy",
-        "update", "get", "keys", "values", "items", "add", "discard", "join",
-        "split", "strip", "lstrip", "rstrip", "replace", "startswith",
-        "endswith", "lower", "upper", "encode", "decode", "find", "index",
-        "count", "sort", "reverse", "read", "write", "close", "flush",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "copy",
+        "update",
+        "get",
+        "keys",
+        "values",
+        "items",
+        "add",
+        "discard",
+        "join",
+        "split",
+        "strip",
+        "lstrip",
+        "rstrip",
+        "replace",
+        "startswith",
+        "endswith",
+        "lower",
+        "upper",
+        "encode",
+        "decode",
+        "find",
+        "index",
+        "count",
+        "sort",
+        "reverse",
+        "read",
+        "write",
+        "close",
+        "flush",
         # JS/TS builtins & noise
-        "require", "parseInt", "parseFloat", "log", "warn", "error", "info",
-        "debug", "push", "shift", "unshift", "slice", "splice", "concat",
-        "includes", "indexOf", "forEach", "reduce", "then", "catch", "finally",
-        "resolve", "reject", "stringify", "parse", "assign", "freeze",
+        "require",
+        "parseInt",
+        "parseFloat",
+        "log",
+        "warn",
+        "error",
+        "info",
+        "debug",
+        "push",
+        "shift",
+        "unshift",
+        "slice",
+        "splice",
+        "concat",
+        "includes",
+        "indexOf",
+        "forEach",
+        "reduce",
+        "then",
+        "catch",
+        "finally",
+        "resolve",
+        "reject",
+        "stringify",
+        "parse",
+        "assign",
+        "freeze",
         "toString",
         # misc cross-language
-        "assert", "panic", "println", "printf", "sprintf",
+        "assert",
+        "panic",
+        "println",
+        "printf",
+        "sprintf",
     }
 )
 
@@ -738,15 +834,11 @@ def build_symbol_graph(
 
     for dirpath, dirnames, filenames in os.walk(root_dir):
         # Filter ignored dirs
-        dirnames[:] = [
-            d for d in dirnames if d not in ignored_dirs and not is_dir_ignored(d)
-        ]
+        dirnames[:] = [d for d in dirnames if d not in ignored_dirs and not is_dir_ignored(d)]
 
         for fname in filenames:
             if file_count >= max_files:
-                logger.info(
-                    f"Symbol graph: hit max_files={max_files}, stopping scan"
-                )
+                logger.info(f"Symbol graph: hit max_files={max_files}, stopping scan")
                 graph._file_count = file_count
                 _finalize_graph(graph)
                 return graph
@@ -797,9 +889,7 @@ def build_symbol_graph(
                 rel_path = fp.as_posix()
 
             try:
-                symbols, refs = _extract_symbols_from_file(
-                    fp, language, parser, source, rel_path
-                )
+                symbols, refs = _extract_symbols_from_file(fp, language, parser, source, rel_path)
             except Exception as e:
                 logger.debug(f"Symbol graph: parse error in {fp}: {e}")
                 continue
@@ -812,13 +902,9 @@ def build_symbol_graph(
                 if ref.kind == "call":
                     graph.calls.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
                 elif ref.kind == "inherit":
-                    graph.inherits.setdefault(ref.from_symbol, set()).add(
-                        ref.to_symbol
-                    )
+                    graph.inherits.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
                 elif ref.kind == "implement":
-                    graph.implements.setdefault(ref.from_symbol, set()).add(
-                        ref.to_symbol
-                    )
+                    graph.implements.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
 
             file_count += 1
 
@@ -831,8 +917,7 @@ def build_symbol_graph(
     graph._file_count = file_count
     if skipped_no_parser:
         logger.info(
-            f"Symbol graph: skipped {skipped_no_parser} files "
-            f"(no tree-sitter parser available)"
+            f"Symbol graph: skipped {skipped_no_parser} files " f"(no tree-sitter parser available)"
         )
     _finalize_graph(graph)
     return graph
@@ -875,9 +960,7 @@ def load_symbol_graph(path: Path | None = None) -> SymbolGraph | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("version") != GRAPH_FORMAT_VERSION:
-            logger.info(
-                "Symbol graph on disk uses an older format — will rebuild"
-            )
+            logger.info("Symbol graph on disk uses an older format — will rebuild")
             return None
         return SymbolGraph.from_dict(data)
     except Exception as e:
@@ -1199,9 +1282,7 @@ def get_symbol_info(symbol_name: str) -> dict[str, Any] | None:
     }
 
 
-def query_symbol_graph(
-    query_text: str, n_results: int = 8
-) -> list[dict[str, Any]]:
+def query_symbol_graph(query_text: str, n_results: int = 8) -> list[dict[str, Any]]:
     """
     Search the symbol graph by name.
 

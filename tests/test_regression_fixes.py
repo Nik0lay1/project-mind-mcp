@@ -227,9 +227,7 @@ class TestSymbolGraphV3:
         src = "class Service:\n    def handle(self):\n        transform_data()\n"
         _symbols, refs = py_extract(src)
         class_calls = {
-            r.to_symbol
-            for r in refs
-            if r.from_symbol == "pkg/mod.py::Service" and r.kind == "call"
+            r.to_symbol for r in refs if r.from_symbol == "pkg/mod.py::Service" and r.kind == "call"
         }
         method_calls = {
             r.to_symbol

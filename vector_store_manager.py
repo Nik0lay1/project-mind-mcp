@@ -36,6 +36,7 @@ class VectorStoreManager:
         self._loaded_at: float = 0.0
         self._time = _time
         import threading
+
         self._init_lock = threading.Lock()
 
     def is_loaded(self) -> bool:
