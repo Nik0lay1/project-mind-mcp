@@ -86,7 +86,9 @@ def test_rag_tools() -> None:
     print("\n--- Testing RAG Tools ---")
 
     print("Indexing codebase...")
-    index_result = index_codebase(force=True)
+    # background=False: the default returns instantly with a "started" note,
+    # and the search below would hit an empty index on a clean CI checkout
+    index_result = index_codebase(force=True, background=False)
     print(f"Index Result: {index_result}")
     assert (
         "Indexed" in index_result
