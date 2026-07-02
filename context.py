@@ -117,9 +117,7 @@ def get_context() -> AppContext:
                     except Exception as e:
                         logger.error(f"Failed to initialize vector store in background: {e}")
 
-                threading.Thread(
-                    target=load_model_bg, args=(_app_context,), daemon=True
-                ).start()
+                threading.Thread(target=load_model_bg, args=(_app_context,), daemon=True).start()
 
     return _app_context
 
