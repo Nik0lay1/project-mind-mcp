@@ -90,6 +90,7 @@ def test_rag_tools() -> None:
     print(f"Index Result: {index_result}")
     assert (
         "Indexed" in index_result
+        or "indexing" in index_result.lower()
         or "No documents" in index_result
         or "Failed to initialize" in index_result
     )

@@ -37,6 +37,8 @@ If `session_init` is unavailable:
 - `Memory__search_architecture` — understand module structure
 - `Memory__get_file_relations` — see what imports what
 - `Memory__get_dependencies_with_depth` — trace dependency chains
+- `Memory__find_symbol` — locate a function/class definition by name (AST graph, no model load)
+- `Memory__get_symbol_relations` — callers / callees / implementors / subclasses of a symbol
 
 ### After making code changes
 ```
@@ -72,7 +74,7 @@ Duplicate entries under the same section are skipped automatically.
 - **Chunking strategy**: AST-aware (tree-sitter) → falls back to text splitter for unsupported types
 - **Chunk metadata**: `symbol_type`, `symbol_name`, `class_name`, `line_start`, `line_end`
 - **Search strategy**: Hybrid — BM25 (keyword) + ChromaDB (semantic) merged via Reciprocal Rank Fusion
-- **BM25 index**: persisted at `.ai/bm25_index.pkl`, rebuilt automatically after every indexing run
+- **BM25 index**: persisted at `.ai/bm25_index.json` (JSON, never pickle — the file lives in the target project), rebuilt automatically after every indexing run
 - **Vector store**: ChromaDB persistent at `.ai/vector_store/`
 - **Memory file**: `.ai/memory.md`
 - **Index ignore**: `.indexignore` in project root (fallback: `.ai/.indexignore`)

@@ -63,7 +63,9 @@ class GitRepository:
     def _get_repo(self) -> git.Repo:
         if self._repo is None:
             try:
-                self._repo = git.Repo(self._path, search_parent_directories=True)
+                # No parent search: a non-repo target project must not silently
+                # bind to an enclosing repo and report unrelated history.
+                self._repo = git.Repo(self._path, search_parent_directories=False)
             except git.InvalidGitRepositoryError as e:
                 raise GitError("Current directory is not a git repository.") from e
             except Exception as e:
@@ -81,7 +83,9 @@ class GitRepository:
         for commit in repo.iter_commits(max_count=max_count):
             commit_info = CommitInfo.from_commit(commit)
             if cutoff_date and commit_info.date < cutoff_date:
-                break
+                # skip, don't break: merge commits interleave dates, so newer
+                # commits can appear after an older parent in iteration order
+                continue
             commits.append(commit_info)
 
         return commits

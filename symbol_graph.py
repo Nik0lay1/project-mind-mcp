@@ -23,17 +23,23 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time as _time_module
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import config
+from ast_splitter import _parse_lock
 from config import get_tool_budget_seconds, safe_read_text
 from incremental_indexing import atomic_write
 from logger import get_logger
 
 logger = get_logger()
+
+# Guards the module-level graph cache (get_or_build / invalidate) so two
+# threads don't build the graph twice or observe a half-swapped cache.
+_graph_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -53,6 +59,13 @@ class SymbolDef:
     base_classes: list[str] = field(default_factory=list)  # for classes
     interfaces: list[str] = field(default_factory=list)  # for classes (implements)
 
+    @property
+    def qualified_id(self) -> str:
+        """Unique id: `path::Class.name` — same-named symbols in different
+        files/classes no longer collapse into one graph node."""
+        owner = f"{self.parent_class}." if self.parent_class else ""
+        return f"{self.file_path}::{owner}{self.name}"
+
 
 @dataclass
 class SymbolRef:
@@ -65,39 +78,58 @@ class SymbolRef:
     line: int
 
 
+# Bump when the on-disk graph layout changes; older files are rebuilt.
+GRAPH_FORMAT_VERSION = 3
+
+
 @dataclass
 class SymbolGraph:
-    """The full symbol-level relationship graph."""
+    """
+    The full symbol-level relationship graph.
 
-    symbols: dict[str, SymbolDef] = field(default_factory=dict)
-    # Forward maps
-    calls: dict[str, set[str]] = field(default_factory=dict)  # caller → callees
-    inherits: dict[str, set[str]] = field(default_factory=dict)  # child → parents
-    implements: dict[str, set[str]] = field(default_factory=dict)  # class → interfaces
-    uses: dict[str, set[str]] = field(default_factory=dict)  # symbol → all it references
-    # Reverse maps (built lazily)
-    _callers_of: dict[str, set[str]] = field(default_factory=dict)  # callee → callers
-    _implementors_of: dict[str, set[str]] = field(default_factory=dict)  # interface → classes
-    _subclasses_of: dict[str, set[str]] = field(default_factory=dict)  # base → children
+    Keying scheme (format v3):
+      * `symbols` is keyed by qualified id (`path::Class.name`) — unique per
+        definition, so same-named symbols across files stay distinct nodes.
+      * Forward edges map a *qualified* source to *bare* target names (call
+        targets are unresolved names by nature); reverse maps go from a bare
+        name back to the qualified ids that reference it.
+      * `by_name` resolves a bare name to all its definitions.
+    """
+
+    symbols: dict[str, SymbolDef] = field(default_factory=dict)  # qid → def
+    # Forward maps: qualified id → bare target names
+    calls: dict[str, set[str]] = field(default_factory=dict)
+    inherits: dict[str, set[str]] = field(default_factory=dict)
+    implements: dict[str, set[str]] = field(default_factory=dict)
+    uses: dict[str, set[str]] = field(default_factory=dict)
+    # Derived indexes (rebuilt by reverse_indexes, not persisted)
+    by_name: dict[str, list[str]] = field(default_factory=dict)  # name → [qid]
+    _callers_of: dict[str, set[str]] = field(default_factory=dict)  # name → caller qids
+    _implementors_of: dict[str, set[str]] = field(default_factory=dict)  # name → qids
+    _subclasses_of: dict[str, set[str]] = field(default_factory=dict)  # name → qids
     _built_at: float = 0.0
     _file_count: int = 0
 
     def reverse_indexes(self) -> None:
-        """Build reverse indexes (callers_of, implementors_of, subclasses_of)."""
+        """Build derived indexes (by_name, callers_of, implementors_of, subclasses_of)."""
+        self.by_name.clear()
+        for qid, sym in self.symbols.items():
+            self.by_name.setdefault(sym.name, []).append(qid)
+
         self._callers_of.clear()
-        for caller, callees in self.calls.items():
-            for callee in callees:
-                self._callers_of.setdefault(callee, set()).add(caller)
+        for caller_qid, callees in self.calls.items():
+            for callee_name in callees:
+                self._callers_of.setdefault(callee_name, set()).add(caller_qid)
 
         self._implementors_of.clear()
-        for cls, ifaces in self.implements.items():
-            for iface in ifaces:
-                self._implementors_of.setdefault(iface, set()).add(cls)
+        for cls_qid, ifaces in self.implements.items():
+            for iface_name in ifaces:
+                self._implementors_of.setdefault(iface_name, set()).add(cls_qid)
 
         self._subclasses_of.clear()
-        for child, parents in self.inherits.items():
-            for parent in parents:
-                self._subclasses_of.setdefault(parent, set()).add(child)
+        for child_qid, parents in self.inherits.items():
+            for parent_name in parents:
+                self._subclasses_of.setdefault(parent_name, set()).add(child_qid)
 
         # Also fill uses from all relationship types
         self.uses.clear()
@@ -108,11 +140,16 @@ class SymbolGraph:
         for src, targets in self.implements.items():
             self.uses.setdefault(src, set()).update(targets)
 
+    def defs_of(self, name: str) -> list[SymbolDef]:
+        """All definitions of a bare symbol name (may be several files/classes)."""
+        return [self.symbols[qid] for qid in self.by_name.get(name, []) if qid in self.symbols]
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         return {
+            "version": GRAPH_FORMAT_VERSION,
             "symbols": {
-                name: {
+                qid: {
                     "name": s.name,
                     "kind": s.kind,
                     "file_path": s.file_path,
@@ -122,7 +159,7 @@ class SymbolGraph:
                     "base_classes": s.base_classes,
                     "interfaces": s.interfaces,
                 }
-                for name, s in self.symbols.items()
+                for qid, s in self.symbols.items()
             },
             "calls": {k: sorted(v) for k, v in self.calls.items()},
             "inherits": {k: sorted(v) for k, v in self.inherits.items()},
@@ -133,10 +170,10 @@ class SymbolGraph:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SymbolGraph:
-        """Deserialize from JSON dict."""
+        """Deserialize from JSON dict (format v3)."""
         g = cls()
-        for name, sdata in data.get("symbols", {}).items():
-            g.symbols[name] = SymbolDef(
+        for qid, sdata in data.get("symbols", {}).items():
+            g.symbols[qid] = SymbolDef(
                 name=sdata["name"],
                 kind=sdata["kind"],
                 file_path=sdata["file_path"],
@@ -394,19 +431,40 @@ def _get_imported_names(root_node: Any, source: bytes) -> set[str]:
 
 
 def _get_class_bases(class_node: Any, source: bytes) -> list[str]:
-    """Extract base class names from a class definition."""
+    """Extract base class names from a class definition (all supported languages)."""
     bases: list[str] = []
+
+    def collect_names(n: Any) -> None:
+        if n.type in (
+            "identifier",
+            "attribute",
+            "type_identifier",
+            "constant",
+            "scoped_identifier",
+            "scoped_type_identifier",
+            "nested_type_identifier",
+        ):
+            bases.append(n.text.decode("utf-8", errors="replace"))
+            return
+        for c in n.children:
+            collect_names(c)
+
     for child in class_node.children:
+        # Python: class X(Base, ...)
         if child.type == "argument_list":
             for arg in child.children:
                 if arg.type in ("identifier", "attribute"):
                     bases.append(arg.text.decode("utf-8", errors="replace"))
-    # Python: superclass list in parentheses after class name
-    for child in class_node.children:
-        if child.type == "parenthesized_list":
-            for item in child.children:
-                if item.type in ("identifier", "attribute"):
-                    bases.append(item.text.decode("utf-8", errors="replace"))
+        # Java: class X extends Base / Ruby: class X < Base / TS interface extends
+        elif child.type in ("superclass", "extends_clause"):
+            collect_names(child)
+        # JS/TS: class X extends Base [implements I] — heritage wrapper node;
+        # the implements part is handled by _get_implements_interfaces.
+        elif child.type == "class_heritage":
+            for sub in child.children:
+                if sub.type == "implements_clause":
+                    continue
+                collect_names(sub)
     return bases
 
 
@@ -428,17 +486,55 @@ def _get_implements_interfaces(class_node: Any, source: bytes) -> list[str]:
     return ifaces
 
 
-def _collect_calls(node: Any, source: bytes, language: str) -> list[str]:
-    """Recursively collect all function/method call names from an AST node."""
+# Ubiquitous builtin / stdlib / method names that would flood the call graph
+# with meaningless edges if recorded.
+_COMMON_BUILTIN_CALLS: frozenset[str] = frozenset(
+    {
+        # Python builtins
+        "print", "len", "str", "int", "float", "bool", "list", "dict", "set",
+        "tuple", "frozenset", "range", "enumerate", "zip", "map", "filter",
+        "sorted", "reversed", "isinstance", "issubclass", "hasattr", "getattr",
+        "setattr", "delattr", "super", "type", "repr", "id", "min", "max",
+        "sum", "abs", "round", "open", "iter", "next", "format", "vars", "dir",
+        "callable", "hash", "input", "property", "staticmethod", "classmethod",
+        # common method-call noise
+        "append", "extend", "insert", "remove", "pop", "clear", "copy",
+        "update", "get", "keys", "values", "items", "add", "discard", "join",
+        "split", "strip", "lstrip", "rstrip", "replace", "startswith",
+        "endswith", "lower", "upper", "encode", "decode", "find", "index",
+        "count", "sort", "reverse", "read", "write", "close", "flush",
+        # JS/TS builtins & noise
+        "require", "parseInt", "parseFloat", "log", "warn", "error", "info",
+        "debug", "push", "shift", "unshift", "slice", "splice", "concat",
+        "includes", "indexOf", "forEach", "reduce", "then", "catch", "finally",
+        "resolve", "reject", "stringify", "parse", "assign", "freeze",
+        "toString",
+        # misc cross-language
+        "assert", "panic", "println", "printf", "sprintf",
+    }
+)
+
+
+def _collect_calls(node: Any, source: bytes, language: str) -> list[tuple[str, int]]:
+    """
+    Collect (call_name, line) pairs from an AST node.
+
+    Nested symbol definitions are NOT descended into — their calls belong to
+    the nested symbol itself, otherwise a class would appear to "call"
+    everything any of its methods call (double attribution).
+    """
     call_types = set(CALL_NODE_TYPES.get(language, []))
-    calls: list[str] = []
+    def_types = set(SYMBOL_DEF_TYPES.get(language, {}))
+    calls: list[tuple[str, int]] = []
 
     def walk(n: Any) -> None:
         if n.type in call_types:
             name = _find_call_name(n, source)
             if name:
-                calls.append(name)
+                calls.append((name, n.start_point[0] + 1))
         for child in n.children:
+            if child.type in def_types:
+                continue
             walk(child)
 
     walk(node)
@@ -455,11 +551,22 @@ def _extract_symbols_from_file(
     language: str,
     parser: Any,
     source: bytes,
+    rel_path: str | None = None,
 ) -> tuple[dict[str, SymbolDef], list[SymbolRef]]:
-    """Extract all symbol definitions and references from a single file."""
+    """
+    Extract all symbol definitions and references from a single file.
+
+    Args:
+        rel_path: Project-relative posix path stored in the graph, so symbol
+            hits fuse with the other search tiers (which use relative posix
+            paths) instead of absolute Windows paths. Falls back to file_path.
+    """
+    stored_path = rel_path if rel_path is not None else str(file_path)
     symbols: dict[str, SymbolDef] = {}
+    local_names: set[str] = set()  # bare names defined in this file
     refs: list[SymbolRef] = []
-    tree = parser.parse(source)
+    with _parse_lock:
+        tree = parser.parse(source)
     root = tree.root_node
 
     def_types = SYMBOL_DEF_TYPES.get(language, {})
@@ -494,25 +601,32 @@ def _extract_symbols_from_file(
                 bases = _get_class_bases(node, source)
                 ifaces = _get_implements_interfaces(node, source)
 
-            symbols[name] = SymbolDef(
+            sym_def = SymbolDef(
                 name=name,
                 kind=sd_kind,
-                file_path=str(file_path),
+                file_path=stored_path,
                 line_start=line_start,
                 line_end=line_end,
                 parent_class=parent_class,
                 base_classes=bases,
                 interfaces=ifaces,
             )
+            qid = sym_def.qualified_id
+            if qid in symbols:
+                # Same name at same scope (overloads, conditional defs):
+                # disambiguate by line so neither definition is lost.
+                qid = f"{qid}#{line_start}"
+            symbols[qid] = sym_def
+            local_names.add(name)
 
             # Record inherit refs
             for base in bases:
                 refs.append(
                     SymbolRef(
-                        from_symbol=name,
+                        from_symbol=qid,
                         to_symbol=base,
                         kind="inherit",
-                        file_path=str(file_path),
+                        file_path=stored_path,
                         line=line_start,
                     )
                 )
@@ -521,31 +635,32 @@ def _extract_symbols_from_file(
             for iface in ifaces:
                 refs.append(
                     SymbolRef(
-                        from_symbol=name,
+                        from_symbol=qid,
                         to_symbol=iface,
                         kind="implement",
-                        file_path=str(file_path),
+                        file_path=stored_path,
                         line=line_start,
                     )
                 )
 
             # Collect call refs from this node's body
             call_names = _collect_calls(node, source, language)
-            for cname in call_names:
-                # Filter out builtins / self-calls / noise
+            for cname, call_line in call_names:
+                if cname in _COMMON_BUILTIN_CALLS:
+                    continue
+                # Keep known symbols, imported names, and plausible identifiers
                 if (
-                    cname in symbols
+                    cname in local_names
                     or cname in imported_names
-                    or cname.isidentifier()
-                    and len(cname) > 1
+                    or (cname.isidentifier() and len(cname) > 2)
                 ):
                     refs.append(
                         SymbolRef(
-                            from_symbol=name,
+                            from_symbol=qid,
                             to_symbol=cname,
                             kind="call",
-                            file_path=str(file_path),
-                            line=line_start,
+                            file_path=stored_path,
+                            line=call_line,
                         )
                     )
 
@@ -677,8 +792,13 @@ def build_symbol_graph(
                 continue
 
             try:
+                rel_path = fp.relative_to(root_dir).as_posix()
+            except ValueError:
+                rel_path = fp.as_posix()
+
+            try:
                 symbols, refs = _extract_symbols_from_file(
-                    fp, language, parser, source
+                    fp, language, parser, source, rel_path
                 )
             except Exception as e:
                 logger.debug(f"Symbol graph: parse error in {fp}: {e}")
@@ -754,6 +874,11 @@ def load_symbol_graph(path: Path | None = None) -> SymbolGraph | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("version") != GRAPH_FORMAT_VERSION:
+            logger.info(
+                "Symbol graph on disk uses an older format — will rebuild"
+            )
+            return None
         return SymbolGraph.from_dict(data)
     except Exception as e:
         logger.warning(f"Failed to load symbol graph: {e}")
@@ -767,6 +892,20 @@ def is_symbol_graph_stale(graph: SymbolGraph, root_dir: Path | None = None) -> b
     graph_mtime = graph._built_at
     if graph_mtime == 0:
         return True
+
+    # Preferred check: the incremental-index metadata tracks the mtime of
+    # every indexed file — far more reliable than sampling top-level dirs.
+    try:
+        if config.INDEX_METADATA_FILE.exists():
+            data = json.loads(config.INDEX_METADATA_FILE.read_text(encoding="utf-8"))
+            if data:
+                newest = max(
+                    (float(info.get("mtime", 0.0) or 0.0) for info in data.values()),
+                    default=0.0,
+                )
+                return newest > graph_mtime
+    except Exception:
+        pass  # fall back to the directory-sampling heuristic below
     # Quick check: scan a few top-level files
     check_count = 0
     try:
@@ -834,42 +973,64 @@ def get_or_build_symbol_graph(force: bool = False) -> SymbolGraph:
     """
     global _cached_graph, _cache_path
 
-    graph_path = _graph_path()
+    with _graph_lock:
+        graph_path = _graph_path()
 
-    # Invalidate cache if path changed (reconfigure called)
-    if _cache_path is not None and _cache_path != graph_path:
-        _cached_graph = None
-    _cache_path = graph_path
+        # Invalidate cache if path changed (reconfigure called)
+        if _cache_path is not None and _cache_path != graph_path:
+            _cached_graph = None
+        _cache_path = graph_path
 
-    if _cached_graph is not None and not force:
-        return _cached_graph
+        if _cached_graph is not None and not force:
+            return _cached_graph
 
-    # Try loading from disk first
-    if not force:
+        # Try loading from disk first
+        if not force:
+            loaded = load_symbol_graph(graph_path)
+            if loaded is not None:
+                # Check if stale
+                if not is_symbol_graph_stale(loaded):
+                    _cached_graph = loaded
+                    return loaded
+                logger.info("Symbol graph is stale; rebuilding...")
+
+        # Build from scratch
+        logger.info("Building symbol graph...")
+        graph = build_symbol_graph(config.PROJECT_ROOT)
+
+        # Save for next time
+        save_symbol_graph(graph, graph_path)
+
+        _cached_graph = graph
+        return graph
+
+
+def peek_symbol_graph() -> SymbolGraph | None:
+    """
+    Return the cached or persisted graph WITHOUT triggering a build.
+
+    For latency-sensitive callers (query tiers) that must not pay the
+    full-repo parse cost inside a search request. Returns None when no
+    up-to-date graph is available yet.
+    """
+    global _cached_graph, _cache_path
+    with _graph_lock:
+        graph_path = _graph_path()
+        if _cache_path == graph_path and _cached_graph is not None:
+            return _cached_graph
         loaded = load_symbol_graph(graph_path)
         if loaded is not None:
-            # Check if stale
-            if not is_symbol_graph_stale(loaded):
-                _cached_graph = loaded
-                return loaded
-            logger.info("Symbol graph is stale; rebuilding...")
-
-    # Build from scratch
-    logger.info("Building symbol graph...")
-    graph = build_symbol_graph(config.PROJECT_ROOT)
-
-    # Save for next time
-    save_symbol_graph(graph, graph_path)
-
-    _cached_graph = graph
-    return graph
+            _cached_graph = loaded
+            _cache_path = graph_path
+        return loaded
 
 
 def invalidate_symbol_graph_cache() -> None:
     """Reset the in-memory symbol graph cache."""
     global _cached_graph, _cache_path
-    _cached_graph = None
-    _cache_path = None
+    with _graph_lock:
+        _cached_graph = None
+        _cache_path = None
 
 
 # ---------------------------------------------------------------------------
@@ -882,153 +1043,112 @@ def _ensure_graph() -> SymbolGraph:
     return get_or_build_symbol_graph(force=False)
 
 
+def _qid_info(g: SymbolGraph, qid: str, **extra: Any) -> dict[str, Any]:
+    """Format a qualified id as a result row (falls back gracefully)."""
+    sym = g.symbols.get(qid)
+    row = {
+        "symbol": sym.name if sym else qid,
+        "qualified": qid,
+        "kind": sym.kind if sym else "unknown",
+        "file": sym.file_path if sym else "unknown",
+        "line": sym.line_start if sym else 0,
+    }
+    row.update(extra)
+    return row
+
+
+def _name_info(g: SymbolGraph, name: str, **extra: Any) -> list[dict[str, Any]]:
+    """Format a bare name as result rows — one per known definition."""
+    defs = g.defs_of(name)
+    if not defs:
+        row = {"symbol": name, "qualified": None, "kind": "unknown", "file": "unknown", "line": 0}
+        row.update(extra)
+        return [row]
+    rows = []
+    for sym in defs:
+        row = {
+            "symbol": sym.name,
+            "qualified": sym.qualified_id,
+            "kind": sym.kind,
+            "file": sym.file_path,
+            "line": sym.line_start,
+        }
+        row.update(extra)
+        rows.append(row)
+    return rows
+
+
 def find_callers(symbol_name: str) -> list[dict[str, Any]]:
     """Return all symbols that call `symbol_name`."""
     g = _ensure_graph()
-    callers = g._callers_of.get(symbol_name, set())
-    results: list[dict[str, Any]] = []
-    for caller in sorted(callers):
-        sym = g.symbols.get(caller)
-        results.append(
-            {
-                "symbol": caller,
-                "kind": sym.kind if sym else "unknown",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-    return results
+    caller_qids = g._callers_of.get(symbol_name, set())
+    return [_qid_info(g, qid) for qid in sorted(caller_qids)]
 
 
 def find_callees(symbol_name: str) -> list[dict[str, Any]]:
-    """Return all symbols called by `symbol_name`."""
+    """Return all symbols called by any definition of `symbol_name`."""
     g = _ensure_graph()
-    callees = g.calls.get(symbol_name, set())
+    callee_names: set[str] = set()
+    for qid in g.by_name.get(symbol_name, []):
+        callee_names.update(g.calls.get(qid, set()))
     results: list[dict[str, Any]] = []
-    for callee in sorted(callees):
-        sym = g.symbols.get(callee)
-        results.append(
-            {
-                "symbol": callee,
-                "kind": sym.kind if sym else "unknown",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
+    for callee in sorted(callee_names):
+        results.extend(_name_info(g, callee))
     return results
 
 
 def find_implementors(interface_name: str) -> list[dict[str, Any]]:
     """Return all classes that implement `interface_name`."""
     g = _ensure_graph()
-    impls = g._implementors_of.get(interface_name, set())
-    results: list[dict[str, Any]] = []
-    for cls_name in sorted(impls):
-        sym = g.symbols.get(cls_name)
-        results.append(
-            {
-                "symbol": cls_name,
-                "kind": sym.kind if sym else "class",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-    return results
+    impl_qids = g._implementors_of.get(interface_name, set())
+    return [_qid_info(g, qid) for qid in sorted(impl_qids)]
 
 
 def find_base_classes(class_name: str) -> list[dict[str, Any]]:
     """Return base (parent) classes of `class_name`."""
     g = _ensure_graph()
-    bases = g.inherits.get(class_name, set())
+    base_names: set[str] = set()
+    for qid in g.by_name.get(class_name, []):
+        base_names.update(g.inherits.get(qid, set()))
     results: list[dict[str, Any]] = []
-    for base in sorted(bases):
-        sym = g.symbols.get(base)
-        results.append(
-            {
-                "symbol": base,
-                "kind": sym.kind if sym else "class",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
+    for base in sorted(base_names):
+        results.extend(_name_info(g, base))
     return results
 
 
 def find_subclasses(class_name: str) -> list[dict[str, Any]]:
     """Return all classes that inherit from `class_name`."""
     g = _ensure_graph()
-    subs = g._subclasses_of.get(class_name, set())
-    results: list[dict[str, Any]] = []
-    for sub in sorted(subs):
-        sym = g.symbols.get(sub)
-        results.append(
-            {
-                "symbol": sub,
-                "kind": sym.kind if sym else "class",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-    return results
+    sub_qids = g._subclasses_of.get(class_name, set())
+    return [_qid_info(g, qid) for qid in sorted(sub_qids)]
 
 
 def find_usages(symbol_name: str) -> list[dict[str, Any]]:
     """Return all symbols that use `symbol_name` in any way."""
     g = _ensure_graph()
     results: list[dict[str, Any]] = []
-
-    # Callers
-    for caller in sorted(g._callers_of.get(symbol_name, set())):
-        sym = g.symbols.get(caller)
-        results.append(
-            {
-                "symbol": caller,
-                "relation": "calls",
-                "kind": sym.kind if sym else "unknown",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-    # Subclasses
-    for sub in sorted(g._subclasses_of.get(symbol_name, set())):
-        sym = g.symbols.get(sub)
-        results.append(
-            {
-                "symbol": sub,
-                "relation": "inherits",
-                "kind": sym.kind if sym else "unknown",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-    # Implementors
-    for impl in sorted(g._implementors_of.get(symbol_name, set())):
-        sym = g.symbols.get(impl)
-        results.append(
-            {
-                "symbol": impl,
-                "relation": "implements",
-                "kind": sym.kind if sym else "unknown",
-                "file": sym.file_path if sym else "unknown",
-                "line": sym.line_start if sym else 0,
-            }
-        )
-
+    for qid in sorted(g._callers_of.get(symbol_name, set())):
+        results.append(_qid_info(g, qid, relation="calls"))
+    for qid in sorted(g._subclasses_of.get(symbol_name, set())):
+        results.append(_qid_info(g, qid, relation="inherits"))
+    for qid in sorted(g._implementors_of.get(symbol_name, set())):
+        results.append(_qid_info(g, qid, relation="implements"))
     return results
 
 
 def find_entry_points(module_path: str) -> list[dict[str, Any]]:
     """Return public/exported symbols defined in a module."""
     g = _ensure_graph()
+    # Graph paths are relative posix; normalize Windows-style input to match.
+    module_path = module_path.replace("\\", "/")
     results: list[dict[str, Any]] = []
-    for name, sym in g.symbols.items():
-        if sym.file_path == module_path or sym.file_path.endswith(
-            "/" + module_path
-        ):
+    for sym in g.symbols.values():
+        sym_path = sym.file_path.replace("\\", "/")
+        if sym_path == module_path or sym_path.endswith("/" + module_path):
             if sym.kind != "method" or sym.parent_class is None:
                 results.append(
                     {
-                        "symbol": name,
+                        "symbol": sym.name,
                         "kind": sym.kind,
                         "file": sym.file_path,
                         "line": sym.line_start,
@@ -1038,23 +1158,44 @@ def find_entry_points(module_path: str) -> list[dict[str, Any]]:
 
 
 def get_symbol_info(symbol_name: str) -> dict[str, Any] | None:
-    """Return full information about a symbol."""
+    """
+    Return full information about a symbol.
+
+    Accepts a bare name (`run`) or a qualified id (`path::Class.run`). For a
+    bare name with several definitions, the first is primary and the rest are
+    listed under `other_definitions`.
+    """
     g = _ensure_graph()
-    sym = g.symbols.get(symbol_name)
-    if sym is None:
+    if symbol_name in g.symbols:
+        qids = [symbol_name]
+    else:
+        qids = g.by_name.get(symbol_name, [])
+    if not qids:
         return None
+
+    sym = g.symbols[qids[0]]
+    callee_names: set[str] = set()
+    for qid in qids:
+        callee_names.update(g.calls.get(qid, set()))
+
     return {
         "name": sym.name,
+        "qualified": qids[0],
         "kind": sym.kind,
         "file": sym.file_path,
         "lines": f"{sym.line_start}-{sym.line_end}",
         "parent_class": sym.parent_class,
         "base_classes": sym.base_classes,
         "interfaces": sym.interfaces,
-        "callers": sorted(g._callers_of.get(symbol_name, set())),
-        "callees": sorted(g.calls.get(symbol_name, set())),
-        "subclasses": sorted(g._subclasses_of.get(symbol_name, set())),
-        "implementors": sorted(g._implementors_of.get(symbol_name, set())),
+        "other_definitions": [
+            {"qualified": q, "file": g.symbols[q].file_path, "line": g.symbols[q].line_start}
+            for q in qids[1:]
+            if q in g.symbols
+        ],
+        "callers": sorted(g._callers_of.get(sym.name, set())),
+        "callees": sorted(callee_names),
+        "subclasses": sorted(g._subclasses_of.get(sym.name, set())),
+        "implementors": sorted(g._implementors_of.get(sym.name, set())),
     }
 
 
@@ -1075,60 +1216,49 @@ def query_symbol_graph(
     if not g.symbols:
         return []
 
-    q = query_text.strip().lower()
+    # Symbol keys are case-sensitive (e.g. class names); compare lowercased on
+    # both sides so an exact match actually fires for capitalized names.
+    ql = query_text.strip().lower()
     results: list[dict[str, Any]] = []
 
-    # Exact match first
-    if q in g.symbols:
-        sym = g.symbols[q]
-        n_callers = len(g._callers_of.get(q, set()))
-        n_callees = len(g.calls.get(q, set()))
-        n_subs = len(g._subclasses_of.get(q, set()))
-        results.append(
-            {
-                "source": sym.file_path,
-                "score": 1.0,
-                "tier": "L1_symbol",
-                "snippet": (
-                    f"{sym.kind} `{sym.name}` "
-                    f"({n_callers} callers, {n_callees} callees, {n_subs} subclasses)"
-                ),
-                "extra": {
-                    "symbol_name": sym.name,
-                    "symbol_kind": sym.kind,
-                    "line": sym.line_start,
-                    "callers": n_callers,
-                    "callees": n_callees,
-                },
-            }
-        )
-        n_results -= 1
+    def _make_hit(qid: str, sym: SymbolDef, score: float) -> dict[str, Any]:
+        n_callers = len(g._callers_of.get(sym.name, set()))
+        n_callees = len(g.calls.get(qid, set()))
+        n_subs = len(g._subclasses_of.get(sym.name, set()))
+        return {
+            "source": sym.file_path,
+            "score": score,
+            "tier": "L1_symbol",
+            "snippet": (
+                f"{sym.kind} `{sym.name}` "
+                f"({n_callers} callers, {n_callees} callees, {n_subs} subclasses)"
+            ),
+            "extra": {
+                "symbol_name": sym.name,
+                "symbol_qualified": qid,
+                "symbol_kind": sym.kind,
+                "line": sym.line_start,
+                "callers": n_callers,
+                "callees": n_callees,
+            },
+        }
+
+    # Exact (case-insensitive) matches first
+    exact_matched: set[str] = set()
+    for qid, sym in g.symbols.items():
+        if sym.name.lower() == ql:
+            results.append(_make_hit(qid, sym, 1.0))
+            exact_matched.add(qid)
+            if len(results) >= n_results:
+                return results
 
     # Substring / contains match
-    if n_results > 0:
-        for name, sym in g.symbols.items():
-            if q in name.lower() and name != q:
-                n_callers = len(g._callers_of.get(name, set()))
-                n_callees = len(g.calls.get(name, set()))
-                results.append(
-                    {
-                        "source": sym.file_path,
-                        "score": 0.75,
-                        "tier": "L1_symbol",
-                        "snippet": (
-                            f"{sym.kind} `{sym.name}` "
-                            f"({n_callers} callers, {n_callees} callees)"
-                        ),
-                        "extra": {
-                            "symbol_name": sym.name,
-                            "symbol_kind": sym.kind,
-                            "line": sym.line_start,
-                            "callers": n_callers,
-                            "callees": n_callees,
-                        },
-                    }
-                )
-                if len(results) >= n_results:
-                    break
+    for qid, sym in g.symbols.items():
+        if qid in exact_matched:
+            continue
+        if ql in sym.name.lower():
+            results.append(_make_hit(qid, sym, 0.75))
+            if len(results) >= n_results:
+                break
 
     return results

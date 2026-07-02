@@ -1,6 +1,6 @@
 [project]
 name = "projectmind"
-version = "0.7.8"
+version = "0.8.0"
 description = "Local Context & Memory MCP Server with RAG capabilities"
 authors = [
     {name = "Mykola Riabokon"}
@@ -46,10 +46,15 @@ build-backend = "setuptools.build_meta"
 py-modules = [
     "mcp_server",
     "ast_splitter",
+    "background_indexer",
     "bm25_index",
     "config",
     "logger",
     "cache_manager",
+    "maintenance",
+    "manifest",
+    "query_router",
+    "symbol_graph",
     "vector_store_manager",
     "memory_manager",
     "codebase_indexer",
@@ -128,23 +133,14 @@ markers = [
 ]
 
 [tool.coverage.run]
+# Only non-product files are excluded: hiding big modules from the report made
+# the coverage number look healthy while the core was untested.
 omit = [
     "tests/*",
     "_smoke.py",
     "_run_ci_tests.py",
     "test_import.py",
     "run_index.py",
-    "ast_splitter.py",
-    "code_intelligence.py",
-    "codebase_indexer.py",
-    "vector_store_manager.py",
-    "bm25_index.py",
-    "manifest.py",
-    "maintenance.py",
-    "query_router.py",
-    "memory_manager.py",
-    "git_utils.py",
-    "mcp_server.py",
 ]
 
 [tool.coverage.report]

@@ -32,6 +32,9 @@ _PROGRESS_INTERVAL = 50
 # Key in .ai/ where progress is persisted
 _PROGRESS_FILENAME = "index_progress.json"
 
+# Scan cap shared by _scan_files and the deleted-file pruning guard
+_SCAN_MAX_FILES = 20000
+
 
 def _progress_path() -> Path:
     """Returns the path to the progress file (respects reconfigure())."""
@@ -86,7 +89,9 @@ class BackgroundIndexer:
 
     # In-memory mirror of the last written progress (avoids disk re-read in
     # the same process when the thread and the MCP tool share memory).
+    # Guarded by _progress_lock: mutated by the daemon thread, copied by tools.
     _progress: dict[str, Any] = {}
+    _progress_lock: threading.Lock = threading.Lock()
 
     # -----------------------------------------------------------------------
     # Public API
@@ -139,8 +144,9 @@ class BackgroundIndexer:
         Prefers the in-memory mirror; falls back to disk read if the mirror
         is empty (e.g. called from a different process / after restart).
         """
-        if cls._progress:
-            return dict(cls._progress)
+        with cls._progress_lock:
+            if cls._progress:
+                return dict(cls._progress)
         return _read_progress() or {"status": "idle"}
 
     @classmethod
@@ -164,29 +170,33 @@ class BackgroundIndexer:
     @classmethod
     def _update(cls, **kwargs: Any) -> None:
         """Update in-memory progress and persist to disk."""
-        cls._progress.update(kwargs)
-        cls._progress["updated_at"] = datetime.now(timezone.utc).isoformat()
-        _write_progress(cls._progress)
+        with cls._progress_lock:
+            cls._progress.update(kwargs)
+            cls._progress["updated_at"] = datetime.now(timezone.utc).isoformat()
+            snapshot = dict(cls._progress)
+        _write_progress(snapshot)
 
     @classmethod
     def _run(cls, root_dir: Path, ai_dir: Path, force: bool) -> None:
         """Main indexing routine executed in the background thread."""
         started_at = datetime.now(timezone.utc).isoformat()
 
-        cls._progress = {
-            "status": "scanning",
-            "phase": "scan",
-            "force": force,
-            "files_total": 0,
-            "files_done": 0,
-            "chunks_done": 0,
-            "started_at": started_at,
-            "updated_at": started_at,
-            "eta_seconds": None,
-            "last_error": None,
-            "root_dir": str(root_dir),
-        }
-        _write_progress(cls._progress)
+        with cls._progress_lock:
+            cls._progress = {
+                "status": "scanning",
+                "phase": "scan",
+                "force": force,
+                "files_total": 0,
+                "files_done": 0,
+                "chunks_done": 0,
+                "started_at": started_at,
+                "updated_at": started_at,
+                "eta_seconds": None,
+                "last_error": None,
+                "root_dir": str(root_dir),
+            }
+            snapshot = dict(cls._progress)
+        _write_progress(snapshot)
 
         try:
             cls._do_index(root_dir, force)
@@ -217,17 +227,10 @@ class BackgroundIndexer:
         ignored_dirs = get_ignored_dirs()
         ignore_patterns = _load_ignore_patterns(root_dir)
 
-        # Lightweight scan (no model needed)
-        from codebase_indexer import CodebaseIndexer as _CI  # noqa: F811
-        temp_indexer = _CI.__new__(_CI)  # skip __init__ — we only need scan
-        temp_indexer.splitter = None  # not used during scan
-
-        from ast_splitter import ASTSplitter
-        temp_indexer.splitter = ASTSplitter()
-
         cls._update(status="scanning", phase="scan")
 
         indexable_files = _scan_files(root_dir, ignored_dirs, ignore_patterns)
+        scan_truncated = len(indexable_files) >= _SCAN_MAX_FILES
         if cls._cancel_event.is_set():
             cls._update(status="idle", last_error="Cancelled during scan")
             return
@@ -250,17 +253,19 @@ class BackgroundIndexer:
         from context import get_context
         ctx = get_context()
 
+        # Initialise BEFORE clearing: clear_collection on a cold client would
+        # fail (or recreate the collection without the embedding function).
+        collection = ctx.vector_store.get_collection()
+        if collection is None:
+            cls._update(status="error", last_error="Failed to initialise vector store.")
+            return
+
         if force:
             logger.info("BackgroundIndexer: clearing existing index (force=True)")
             err = ctx.vector_store.clear_collection()
             if err:
                 cls._update(status="error", last_error=err)
                 return
-
-        collection = ctx.vector_store.get_collection()
-        if collection is None:
-            cls._update(status="error", last_error="Failed to initialise vector store.")
-            return
 
         if cls._cancel_event.is_set():
             cls._update(status="idle", last_error="Cancelled after model init")
@@ -269,25 +274,17 @@ class BackgroundIndexer:
         # ── Phase 3: index files in batches ─────────────────────────────────
         cls._update(status="indexing", phase="embedding")
 
-        from config import BATCH_SIZE, get_max_memory_bytes
+        from config import get_max_memory_bytes
         from memory_limited_indexer import MemoryLimitedIndexer
 
         max_memory = get_max_memory_bytes()
 
-        def _batch_upsert(
-            documents: list[str], metadatas: list[dict], ids: list[str]
-        ) -> None:
-            for i in range(0, len(documents), BATCH_SIZE):
-                end = min(i + BATCH_SIZE, len(documents))
-                ctx.vector_store.upsert(
-                    documents=documents[i:end],
-                    metadatas=metadatas[i:end],
-                    ids=ids[i:end],
-                )
-
-        mem_indexer = MemoryLimitedIndexer(max_memory, _batch_upsert)
         indexer = CodebaseIndexer(ctx.vector_store)
+        upserter = indexer._create_batch_upserter()
+        mem_indexer = MemoryLimitedIndexer(max_memory, upserter)
         metadata = IndexMetadata()
+        if force:
+            metadata.metadata = {}
 
         file_count = 0
         import time as _time
@@ -298,13 +295,10 @@ class BackgroundIndexer:
                 cls._update(status="idle", last_error="Cancelled during indexing")
                 return
 
-            if indexer.process_file_to_chunks(file_path, mem_indexer):
+            if indexer.process_file_with_metadata(
+                file_path, mem_indexer, metadata, delete_stale=not force
+            ):
                 file_count += 1
-                try:
-                    mtime = file_path.stat().st_mtime
-                    metadata.update_file(str(file_path), mtime)
-                except Exception:
-                    pass
 
             # Report progress every _PROGRESS_INTERVAL files
             if (i + 1) % _PROGRESS_INTERVAL == 0 or i == len(indexable_files) - 1:
@@ -323,16 +317,49 @@ class BackgroundIndexer:
         # ── Phase 4: flush + BM25 rebuild ───────────────────────────────────
         cls._update(status="finalizing", phase="bm25", eta_seconds=None)
 
-        mem_indexer.flush()
+        try:
+            mem_indexer.flush()
+        except Exception:
+            pass  # upserter.failed is set; handled below
 
-        existing_files = {str(f) for f in indexable_files}
-        metadata.remove_deleted_files(existing_files)
+        if upserter.failed:
+            cls._update(
+                status="error",
+                last_error=(
+                    "Some chunks could not be written to the vector store. "
+                    "Index metadata was not saved; affected files will be "
+                    "re-indexed on the next run."
+                ),
+            )
+            return
+
+        # Only prune "deleted" files when the scan saw the whole tree — a
+        # truncated scan would misclassify live files beyond the cap as deleted.
+        if not scan_truncated:
+            existing_files = {str(f) for f in indexable_files}
+            removed = metadata.remove_deleted_files(existing_files)
+            for removed_path in removed:
+                ctx.vector_store.delete_by_source(removed_path)
+            if removed:
+                logger.info(
+                    f"BackgroundIndexer: removed chunks of {len(removed)} deleted files"
+                )
         metadata.save()
 
         logger.info("BackgroundIndexer: rebuilding BM25 index...")
         ctx.vector_store.rebuild_bm25()
 
         invalidate_import_graph_cache()
+
+        # Refresh the symbol graph while we're already in a background thread,
+        # so search-time callers get it for free via peek_symbol_graph().
+        try:
+            from symbol_graph import get_or_build_symbol_graph
+
+            logger.info("BackgroundIndexer: rebuilding symbol graph...")
+            get_or_build_symbol_graph(force=True)
+        except Exception as e:
+            logger.warning(f"BackgroundIndexer: symbol graph rebuild failed: {e}")
 
         stats = mem_indexer.get_stats()
         cls._update(
@@ -370,7 +397,7 @@ def _scan_files(
     )
 
     indexable_files: list[Path] = []
-    max_files = 20000
+    max_files = _SCAN_MAX_FILES
 
     for root, dirs, files in os.walk(root_dir):
         if len(indexable_files) >= max_files:

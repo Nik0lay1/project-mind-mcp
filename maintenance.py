@@ -120,6 +120,24 @@ def save_state(state: MaintenanceState) -> None:
     try:
         from incremental_indexing import atomic_write
 
+        # Merge with the on-disk copy first: the daemon and `run_all_now()`
+        # each hold independent state objects, and a plain overwrite would
+        # rewind the other writer's timestamps (tasks would rerun too early).
+        disk = load_state()
+        for attr in (
+            "last_manifest_refresh",
+            "last_stale_gc",
+            "last_db_compaction",
+            "last_log_truncate",
+            "last_model_unload_check",
+            "last_cache_pressure_check",
+        ):
+            merged = max(
+                float(getattr(state, attr, 0.0) or 0.0),
+                float(getattr(disk, attr, 0.0) or 0.0),
+            )
+            setattr(state, attr, merged)
+
         config.AI_DIR.mkdir(parents=True, exist_ok=True)
         atomic_write(_state_path(), json.dumps(state.to_dict(), indent=2))
     except Exception as e:
@@ -303,24 +321,27 @@ def _get_app_context() -> Any:
 
 
 def _process_rss_mb() -> float:
-    try:
-        import importlib
+    """Current RSS in MB, or 0.0 if it cannot be determined.
 
-        resource = importlib.import_module("resource")
-        rss_kb = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        # On macOS RSS is in bytes; on Linux in KB. Heuristic.
-        if rss_kb > 10**9:
-            return rss_kb / (1024 * 1024)
-        return rss_kb / 1024
-    except Exception:
-        pass
+    Deliberately avoids resource.getrusage().ru_maxrss: that is the lifetime
+    *peak* RSS, so once the process ever crossed the threshold (e.g. while
+    loading the embedding model) memory-pressure relief would fire forever.
+    """
     try:
         import importlib
 
         psutil = importlib.import_module("psutil")
         return float(psutil.Process(os.getpid()).memory_info().rss) / (1024 * 1024)
     except Exception:
-        return 0.0
+        pass
+    try:
+        with open("/proc/self/status", encoding="ascii", errors="ignore") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return float(line.split()[1]) / 1024  # kB → MB
+    except Exception:
+        pass
+    return 0.0
 
 
 def task_unload_idle_model(state: MaintenanceState) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -73,8 +74,18 @@ NAME_FIELD: dict[str, str] = {
 
 _parsers: dict[str, Any] = {}
 
+# tree-sitter Parser objects are NOT thread-safe: concurrent parse() calls on
+# a shared parser can crash the interpreter. All parser creation and parsing
+# is serialized through this lock (parsing is cheap next to embedding).
+_parse_lock = threading.RLock()
+
 
 def _get_parser(language: str) -> Any | None:
+    with _parse_lock:
+        return _get_parser_locked(language)
+
+
+def _get_parser_locked(language: str) -> Any | None:
     if language in _parsers:
         return _parsers[language]
 
@@ -272,7 +283,8 @@ class ASTSplitter:
         self, content: str, language: str, parser: Any, file_path: Path
     ) -> list[dict[str, Any]]:
         source = content.encode("utf-8")
-        tree = parser.parse(source)
+        with _parse_lock:
+            tree = parser.parse(source)
         root = tree.root_node
 
         top_types = TOP_LEVEL_NODES.get(language, [])

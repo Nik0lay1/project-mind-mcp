@@ -1,5 +1,6 @@
 """Application context for dependency injection."""
 
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -63,13 +64,16 @@ class AppContext:
         Returns:
             SymbolGraph instance (may be empty if build fails).
         """
-        if self._symbol_graph is None:
-            from symbol_graph import get_or_build_symbol_graph
-            self._symbol_graph = get_or_build_symbol_graph(force=False)
-        return self._symbol_graph
+        with _symbol_graph_lock:
+            if self._symbol_graph is None:
+                from symbol_graph import get_or_build_symbol_graph
+                self._symbol_graph = get_or_build_symbol_graph(force=False)
+            return self._symbol_graph
 
 
 _app_context: AppContext | None = None
+_context_lock = threading.Lock()
+_symbol_graph_lock = threading.Lock()
 
 
 def get_context() -> AppContext:
@@ -77,30 +81,35 @@ def get_context() -> AppContext:
     Gets the global application context, creating it if necessary.
     Also ensures startup initialization has been performed.
 
+    Thread-safe: MCP tool threads and background indexer threads may race
+    here; only one AppContext (and one ChromaDB client) must ever be created.
+
     Returns:
         Global AppContext instance
     """
     global _app_context
-    if _app_context is None:
-        from mcp_server import ensure_startup
+    if _app_context is not None:
+        return _app_context
 
-        ensure_startup()
-        _app_context = AppContext.create_default()
+    with _context_lock:
+        if _app_context is None:
+            from mcp_server import ensure_startup
 
-        # Load embedding model in background so it is ready for queries
-        import threading
+            ensure_startup()
+            _app_context = AppContext.create_default()
 
-        from logger import setup_logger
-        logger = setup_logger()
+            # Load embedding model in background so it is ready for queries
+            from logger import setup_logger
+            logger = setup_logger()
 
-        def load_model_bg(ctx: AppContext):
-            try:
-                logger.info("Starting background loading of embedding model...")
-                ctx.vector_store.initialize()
-            except Exception as e:
-                logger.error(f"Failed to initialize vector store in background: {e}")
+            def load_model_bg(ctx: AppContext):
+                try:
+                    logger.info("Starting background loading of embedding model...")
+                    ctx.vector_store.initialize()
+                except Exception as e:
+                    logger.error(f"Failed to initialize vector store in background: {e}")
 
-        threading.Thread(target=load_model_bg, args=(_app_context,), daemon=True).start()
+            threading.Thread(target=load_model_bg, args=(_app_context,), daemon=True).start()
 
     return _app_context
 

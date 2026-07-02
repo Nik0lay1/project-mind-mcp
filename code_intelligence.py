@@ -33,8 +33,14 @@ TODO_PATTERN_SLASHCOMMENT = re.compile(
 )
 
 PY_IMPORT_RE = re.compile(r"^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.MULTILINE)
+# [^'"]*? between `import` and `from` lets prettier-wrapped multi-line imports
+# match; the extra alternatives catch dynamic import() and side-effect imports.
 JS_IMPORT_RE = re.compile(
-    r"""(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))"""
+    r"""(?:import\s+[^'"]*?from\s+['"]([^'"]+)['"]"""
+    r"""|import\s*\(\s*['"]([^'"]+)['"]\s*\)"""
+    r"""|import\s+['"]([^'"]+)['"]"""
+    r"""|require\s*\(\s*['"]([^'"]+)['"]\s*\))""",
+    re.DOTALL,
 )
 GO_IMPORT_RE = re.compile(r'"([^"]+)"')
 RUST_USE_RE = re.compile(r"^\s*use\s+([\w:]+)")
@@ -408,14 +414,16 @@ def _extract_imports_py(content: str) -> list[str]:
     for match in PY_IMPORT_RE.finditer(content):
         module = match.group(1) or match.group(2)
         if module:
-            imports.append(module.split(".")[0])
+            # Keep the full dotted path (and leading dots of relative imports):
+            # _python_import_candidates needs them to resolve the actual file.
+            imports.append(module)
     return imports
 
 
 def _extract_imports_js(content: str) -> list[str]:
     imports = []
     for match in JS_IMPORT_RE.finditer(content):
-        path = match.group(1) or match.group(2)
+        path = match.group(1) or match.group(2) or match.group(3) or match.group(4)
         if path:
             imports.append(path)
     return imports
@@ -884,9 +892,10 @@ def get_module_cluster(
     if norm_path not in graph:
         return {}
 
-    # Get all dependencies (imports + importers)
+    # Get all dependencies (imports + importers) via a single reverse pass
+    reverse = _build_reverse_graph(graph)
     target_imports = set(graph.get(norm_path, []))
-    target_importers = {src for src, targets in graph.items() if norm_path in targets}
+    target_importers = reverse.get(norm_path, set())
     target_deps = target_imports | target_importers
 
     if not target_deps:
@@ -899,7 +908,7 @@ def get_module_cluster(
         if other_file == norm_path:
             continue
 
-        other_importers = {src for src, targets in graph.items() if other_file in targets}
+        other_importers = reverse.get(other_file, set())
         other_deps = set(other_imports) | other_importers
 
         if not other_deps:
@@ -917,6 +926,16 @@ def get_module_cluster(
     # Sort by similarity and limit size
     sorted_similar = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
     return dict(sorted_similar[:max_cluster_size])
+
+
+def _build_reverse_graph(graph: dict[str, list[str]]) -> dict[str, set[str]]:
+    """target → set of files importing it. One O(E) pass instead of rescanning
+    the whole graph per node (which made cluster/impact tools O(N²·E))."""
+    reverse: dict[str, set[str]] = {}
+    for src, targets in graph.items():
+        for t in targets:
+            reverse.setdefault(t, set()).add(src)
+    return reverse
 
 
 def _find_related_tests_from_graph(file_path: str, graph: dict[str, list[str]]) -> list[str]:
@@ -1288,10 +1307,8 @@ def analyze_change_impact(file_path: str, root: Path) -> str:
     if norm_path not in graph:
         return f"File `{norm_path}` not found in import graph. Is it a code file in the project?"
 
-    direct_dependents: list[str] = []
-    for source, targets in graph.items():
-        if norm_path in targets and source != norm_path:
-            direct_dependents.append(source)
+    reverse = _build_reverse_graph(graph)
+    direct_dependents = sorted(s for s in reverse.get(norm_path, set()) if s != norm_path)
 
     transitive: set[str] = set()
     queue = list(direct_dependents)
@@ -1302,8 +1319,8 @@ def analyze_change_impact(file_path: str, root: Path) -> str:
             continue
         visited.add(current)
         transitive.add(current)
-        for source, targets in graph.items():
-            if current in targets and source not in visited:
+        for source in reverse.get(current, set()):
+            if source not in visited:
                 queue.append(source)
 
     related_tests = _find_related_tests_from_graph(norm_path, graph)
@@ -1502,14 +1519,15 @@ def compute_file_complexity_ast(
         return []
 
     try:
-        from ast_splitter import _get_parser
+        from ast_splitter import _get_parser, _parse_lock
 
         parser = _get_parser(language)
         if not parser:
             return []
 
         source = file_path.read_bytes()
-        tree = parser.parse(source)
+        with _parse_lock:
+            tree = parser.parse(source)
         root = tree.root_node
 
         func_types = _FUNCTION_NODES.get(language, set())

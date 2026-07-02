@@ -396,11 +396,16 @@ def is_manifest_stale(manifest: Manifest, root: Path | None = None) -> bool:
                     break
             except OSError:
                 continue
-        if found_change:
+        if found_change or fresh_count > MAX_FILES_TO_SCAN:
             break
 
     if found_change:
         return True
+
+    # The manifest itself is capped at MAX_FILES_TO_SCAN files: cap the fresh
+    # count the same way, otherwise a repo larger than the cap would show
+    # permanent "drift" and trigger a full rebuild on every maintenance cycle.
+    fresh_count = min(fresh_count, MAX_FILES_TO_SCAN)
 
     indexed = manifest.stats.indexed_files or 1
     drift = abs(indexed - fresh_count) / indexed

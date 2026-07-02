@@ -51,13 +51,11 @@ class VectorStoreManager:
 
         Subsequent queries will lazily reload via `get_collection()`.
         """
-        try:
+        with self._init_lock:
             self.embedding_fn = None
             self.collection = None
             self._initialized = False
-            self._query_cache.cache.clear() if hasattr(self._query_cache, "cache") else None
-        except Exception:
-            pass
+            self._query_cache.clear()
 
     def initialize(self) -> bool:
         """
@@ -126,8 +124,11 @@ class VectorStoreManager:
         Returns:
             Error message if failed, None if successful
         """
-        if not self.chroma_client:
-            return "ChromaDB client not initialized"
+        # Initialize (or re-initialize after unload_model) so the collection is
+        # recreated with the configured embedding function, not Chroma's default.
+        if not self.chroma_client or self.embedding_fn is None:
+            if not self.initialize():
+                return "ChromaDB client not initialized"
 
         try:
             self.chroma_client.delete_collection(self.collection_name)
@@ -137,6 +138,7 @@ class VectorStoreManager:
                 metadata={"hnsw:space": "cosine"},
             )
             self._bm25_index.clear()
+            self._query_cache.clear()
             logger.info(f"Collection '{self.collection_name}' cleared successfully")
             return None
         except Exception as e:
@@ -258,9 +260,29 @@ class VectorStoreManager:
 
         try:
             coll.upsert(documents=documents, metadatas=metadatas, ids=ids)
+            self._query_cache.clear()
             return True
         except Exception as e:
             logger.error(f"Error upserting to collection: {e}", exc_info=True)
+            return False
+
+    def delete_by_source(self, source: str) -> bool:
+        """
+        Deletes all chunks whose metadata `source` matches, so re-indexing a
+        changed file (or dropping a deleted one) leaves no stale chunks behind.
+
+        Returns:
+            True if the delete call succeeded (including no-op), False on error.
+        """
+        coll = self.get_collection()
+        if coll is None:
+            return False
+        try:
+            coll.delete(where={"source": source})
+            self._query_cache.clear()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chunks for {source}: {e}", exc_info=True)
             return False
 
     def get_all_documents(self) -> tuple[list[str], list[str], list[dict[str, Any]]]:
@@ -294,6 +316,39 @@ class VectorStoreManager:
             return
         self._bm25_index.build(ids, docs, metas)
         self._bm25_index.save()
+        self._query_cache.clear()
+
+    def update_bm25_source(
+        self, source: str, ids: list[str], texts: list[str], metadatas: list[dict]
+    ) -> bool:
+        """
+        Incrementally replaces one file's documents in the BM25 corpus.
+
+        Returns False when no corpus is loaded — the caller should finalize
+        with a full rebuild instead.
+        """
+        if not self._bm25_index.has_corpus:
+            self._bm25_index.load()
+        return self._bm25_index.update_source(source, ids, texts, metadatas)
+
+    def remove_bm25_source(self, source: str) -> None:
+        """Drops one deleted file's documents from the BM25 corpus."""
+        self._bm25_index.remove_source(source)
+
+    def finalize_bm25(self, incremental_ok: bool = False) -> None:
+        """
+        Rebuilds the BM25 matrix after an indexing run.
+
+        With `incremental_ok=True` and a loaded corpus, rebuilds from memory —
+        no full ChromaDB fetch, which on large repos turns every small
+        `index_changed_files` call from minutes into seconds.
+        """
+        if incremental_ok and self._bm25_index.has_corpus:
+            self._bm25_index.rebuild_from_corpus()
+            self._bm25_index.save()
+            self._query_cache.clear()
+        else:
+            self.rebuild_bm25()
 
     def hybrid_query(
         self,
@@ -360,7 +415,9 @@ class VectorStoreManager:
             "ids": [[item["id"] for item in merged]],
             "documents": [[item["text"] for item in merged]],
             "metadatas": [[item["metadata"] for item in merged]],
-            "distances": [[item.get("distance", 0.0) for item in merged]],
+            # BM25-only hits have no measured semantic distance; use a neutral
+            # 0.5 so they are not reported as "100% relevant" (distance 0).
+            "distances": [[item.get("distance", 0.5) for item in merged]],
         }
         self._query_cache.put(cache_key, result)
         return result

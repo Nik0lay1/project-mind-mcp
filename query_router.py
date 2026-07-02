@@ -149,6 +149,37 @@ def _tier_l1(query: str, n: int) -> list[QueryHit]:
     return hits
 
 
+def _tier_l1_symbol(query: str, n: int) -> list[QueryHit]:
+    """
+    Symbol-graph tier: exact/substring matches on function/class/method names.
+
+    Uses peek_symbol_graph() so a search request never pays the cost of a
+    full-repo graph build — the graph is (re)built by the background indexer.
+    """
+    try:
+        from symbol_graph import peek_symbol_graph, query_symbol_graph
+
+        if peek_symbol_graph() is None:
+            logger.debug("L1_symbol skipped: no symbol graph available yet")
+            return []
+        raw = query_symbol_graph(query, n_results=n)
+    except Exception as e:
+        logger.warning(f"L1_symbol tier failed: {e}")
+        return []
+    hits: list[QueryHit] = []
+    for item in raw:
+        hits.append(
+            QueryHit(
+                source=item.get("source", ""),
+                score=float(item.get("score", 0.0)),
+                tier="L1_symbol",
+                snippet=item.get("snippet", ""),
+                extra=item.get("extra", {}),
+            )
+        )
+    return hits
+
+
 _L2_TIMEOUT_SECONDS = 20.0
 
 
@@ -170,13 +201,19 @@ def _tier_l2(query: str, n: int) -> list[QueryHit]:
         if coll is None:
             return []
 
+        # No `with` block: ThreadPoolExecutor.__exit__ does shutdown(wait=True),
+        # which would block on the hung worker and defeat the timeout entirely.
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="l2-query"
+        )
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(vs.hybrid_query, [query], n)
-                raw = future.result(timeout=_L2_TIMEOUT_SECONDS)
+            future = executor.submit(vs.hybrid_query, [query], n)
+            raw = future.result(timeout=_L2_TIMEOUT_SECONDS)
         except concurrent.futures.TimeoutError:
             logger.warning(f"L2 hybrid_query timed out after {_L2_TIMEOUT_SECONDS}s")
             return []
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
         logger.warning(f"L2 vector query failed: {e}")
         return []
@@ -295,6 +332,13 @@ def query(
         if not merged:
             notes.append("no L0 matches; try a more specific keyword")
         return QueryResult(user_query, intent, merged, tiers_used, notes)
+
+    # Symbol-graph tier: cheap (in-memory name lookup), boosts hits whose
+    # symbol name matches the query across the other tiers via RRF.
+    l1s = _tier_l1_symbol(user_query, n=max(n_results, 8))
+    if l1s:
+        tiers_used.append("L1_symbol")
+        buckets.append(l1s)
 
     # Decide whether to escalate to L1
     need_more = intent in ("semantic", "deep") or len(l0) < max(3, n_results // 2)

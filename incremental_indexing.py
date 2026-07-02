@@ -67,13 +67,8 @@ def atomic_write(file_path: Path, content: str) -> None:
             f.flush()
             os.fsync(f.fileno())
 
-        if sys.platform == "win32":
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            except FileNotFoundError:
-                pass
-
+        # os.replace atomically overwrites the target on both POSIX and Windows;
+        # unlinking first would open a window where the file does not exist.
         os.replace(temp_path, file_path)
     except Exception:
         try:
@@ -91,7 +86,7 @@ class IndexMetadata:
     def load(self) -> None:
         if config.INDEX_METADATA_FILE.exists():
             try:
-                with open(config.INDEX_METADATA_FILE) as f:
+                with open(config.INDEX_METADATA_FILE, encoding="utf-8") as f:
                     self.metadata = json.load(f)
             except Exception:
                 self.metadata = {}
@@ -132,14 +127,16 @@ class IndexMetadata:
                 current_mtime = file_path.stat().st_mtime
                 stored_mtime = self.get_file_mtime(str(file_path))
 
-                if current_mtime > stored_mtime:
+                # != (not >) so edits that keep or rewind the timestamp are still picked up
+                if current_mtime != stored_mtime:
                     changed_files.append(file_path)
             except Exception:
                 changed_files.append(file_path)
 
         return changed_files
 
-    def remove_deleted_files(self, existing_files: set[str]) -> None:
+    def remove_deleted_files(self, existing_files: set[str]) -> list[str]:
+        """Drops metadata entries for files no longer present; returns the removed paths."""
         files_to_remove = []
         for file_path in self.metadata.keys():
             if file_path not in existing_files:
@@ -147,6 +144,7 @@ class IndexMetadata:
 
         for file_path in files_to_remove:
             del self.metadata[file_path]
+        return files_to_remove
 
     def get_stats(self) -> dict[str, int | str | None]:
         if not self.metadata:

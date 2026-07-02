@@ -92,7 +92,7 @@ class MemoryManager:
 
         try:
             with self._lock:
-                content = self.memory_file.read_text()
+                content = self.memory_file.read_text(encoding="utf-8", errors="replace")
 
             if max_lines is None:
                 return content
@@ -240,12 +240,12 @@ class MemoryManager:
 - Memory cleared.
 """
                 with self._lock:
-                    self.memory_file.write_text(template)
+                    self.memory_file.write_text(template, encoding="utf-8")
                 logger.info("Memory cleared (template preserved)")
                 return "Memory cleared (template preserved)."
             else:
                 with self._lock:
-                    self.memory_file.write_text("")
+                    self.memory_file.write_text("", encoding="utf-8")
                 logger.info("Memory completely cleared")
                 return "Memory completely cleared."
         except Exception as e:
@@ -269,8 +269,11 @@ class MemoryManager:
             return "Error: Section name cannot be empty."
 
         try:
+            from incremental_indexing import atomic_write
+
+            target = section_name.strip().lower()
             with self._lock:
-                content = self.memory_file.read_text()
+                content = self.memory_file.read_text(encoding="utf-8", errors="replace")
                 lines = content.split("\n")
                 new_lines = []
                 skip = False
@@ -279,8 +282,9 @@ class MemoryManager:
                 for line in lines:
                     stripped = line.lstrip("#")
                     current_level = len(line) - len(stripped) if line.startswith("#") else 0
+                    heading_text = stripped.strip().lower() if current_level else ""
 
-                    if current_level >= 2 and section_name.lower() in line.lower():
+                    if current_level >= 2 and heading_text == target:
                         skip = True
                         skip_level = current_level
                         continue
@@ -290,7 +294,7 @@ class MemoryManager:
                     if not skip:
                         new_lines.append(line)
 
-                self.memory_file.write_text("\n".join(new_lines))
+                atomic_write(self.memory_file, "\n".join(new_lines))
             logger.info(f"Section '{section_name}' deleted")
             return f"Section '{section_name}' deleted successfully."
         except Exception as e:

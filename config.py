@@ -14,8 +14,9 @@ def find_project_root() -> Path:
     Detection strategy:
     1. Check command-line argument --project-root
     2. Check environment variables (WORKSPACE_FOLDER, PROJECT_ROOT, PROJECT_PATH)
-    3. Search upward from CWD for project markers, skipping the MCP server's own directory
-    4. Fall back to current working directory
+    3. Search upward from CWD for project markers, skipping the MCP server's own directory,
+       the user's home directory, and drive roots.
+    4. Fall back to current working directory (if safe) or the MCP server's own directory.
 
     Returns:
         Path to project root directory
@@ -32,6 +33,11 @@ def find_project_root() -> Path:
             if project_path.exists():
                 return project_path
 
+    try:
+        home = Path.home().resolve()
+    except Exception:
+        home = None
+
     current = Path.cwd().resolve()
     project_markers = [
         ".git",
@@ -47,7 +53,8 @@ def find_project_root() -> Path:
     ]
 
     for _ in range(10):
-        if current != _MCP_SERVER_DIR:
+        # Do not treat home directory or drive root as a project root
+        if current != _MCP_SERVER_DIR and current != home and current.parent != current:
             for marker in project_markers:
                 if (current / marker).exists():
                     return current
@@ -57,7 +64,11 @@ def find_project_root() -> Path:
             break
         current = parent
 
-    return Path.cwd().resolve()
+    # Fall back to CWD only if it is not the home directory or a drive root
+    cwd = Path.cwd().resolve()
+    if cwd != home and cwd.parent != cwd:
+        return cwd
+    return _MCP_SERVER_DIR
 
 
 PROJECT_ROOT = find_project_root()
@@ -69,7 +80,9 @@ MEMORY_FILE = AI_DIR / "memory.md"
 VECTOR_STORE_DIR = AI_DIR / "vector_store"
 INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
 INDEX_METADATA_FILE = AI_DIR / "index_metadata.json"
-BM25_INDEX_PATH = AI_DIR / "bm25_index.pkl"
+# JSON on purpose: the file lives in the target project's .ai/ dir, so a
+# pickle here would mean executing untrusted input on load.
+BM25_INDEX_PATH = AI_DIR / "bm25_index.json"
 MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
 LOG_FILE = AI_DIR / "projectmind.log"
 LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -101,7 +114,7 @@ def reconfigure(new_root: Path) -> None:
     VECTOR_STORE_DIR = AI_DIR / "vector_store"
     INDEX_IGNORE_FILE = AI_DIR / ".indexignore"
     INDEX_METADATA_FILE = AI_DIR / "index_metadata.json"
-    BM25_INDEX_PATH = AI_DIR / "bm25_index.pkl"
+    BM25_INDEX_PATH = AI_DIR / "bm25_index.json"
     MEMORY_HISTORY_DIR = AI_DIR / "memory_history"
     LOG_FILE = AI_DIR / "projectmind.log"
 

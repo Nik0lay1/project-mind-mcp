@@ -55,10 +55,13 @@ def startup_check() -> None:
             pycache_ignored = False
 
             if gitignore_path.exists():
-                content = gitignore_path.read_text()
-                if ".ai/" in content or ".ai" in content:
+                content = gitignore_path.read_text(encoding="utf-8", errors="replace")
+                # Line-based check: a substring test would match ".aider*",
+                # "*.aiff" etc. and silently skip adding the real .ai/ entry.
+                entries = {ln.strip().rstrip("/") for ln in content.splitlines()}
+                if ".ai" in entries:
                     ai_ignored = True
-                if "__pycache__" in content:
+                if "__pycache__" in entries:
                     pycache_ignored = True
 
                 if not ai_ignored or not pycache_ignored:
@@ -152,12 +155,72 @@ def _check_index_ready() -> str | None:
                 "⚠️ INDEX IS EMPTY. The vector store exists but has no data.\n"
                 "Steps:\n1. Call `index_codebase(force=True)` to rebuild the index\n2. Then retry this tool."
             )
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower() or "busy" in str(e).lower():
+            return (
+                "⚠️ INDEX IS BUSY. The vector store is currently being written "
+                "(indexing in progress). Check `get_index_progress()` and retry shortly."
+            )
+        return (
+            "⚠️ INDEX IS UNREADABLE. The vector store may be corrupted.\n"
+            "Steps:\n1. Call `index_codebase(force=True)` to rebuild the index\n2. Then retry this tool."
+        )
     except Exception:
         return (
             "⚠️ INDEX IS UNREADABLE. The vector store may be corrupted.\n"
             "Steps:\n1. Call `index_codebase(force=True)` to rebuild the index\n2. Then retry this tool."
         )
     return None
+
+
+def _source_rel_path(meta: dict) -> str | None:
+    """
+    Returns the chunk's source file as a project-relative posix path.
+
+    Chunk metadata stores the path under "source" (as an absolute OS path at
+    index time); the import graph and manifest use relative posix paths, so
+    normalize before any graph lookup or cross-tier comparison.
+    """
+    src = meta.get("source") or meta.get("file_path")
+    if not src:
+        return None
+    try:
+        p = Path(str(src))
+        if p.is_absolute():
+            return p.resolve().relative_to(config.PROJECT_ROOT.resolve()).as_posix()
+        return p.as_posix()
+    except Exception:
+        return str(src).replace("\\", "/")
+
+
+def _stop_background_indexing(timeout_seconds: float = 15.0) -> str | None:
+    """
+    Cancels a running background index job and waits (bounded) for it to stop.
+
+    Must be called before reconfigure(): a job started for project A would
+    otherwise keep writing A's chunks into project B's freshly switched
+    vector store.
+
+    Returns:
+        A human-readable note when a job was cancelled, else None.
+    """
+    try:
+        from background_indexer import BackgroundIndexer
+
+        if not BackgroundIndexer.is_running():
+            return None
+        BackgroundIndexer.cancel()
+        thread = BackgroundIndexer._thread
+        if thread is not None:
+            thread.join(timeout=timeout_seconds)
+        if BackgroundIndexer.is_running():
+            return (
+                "⚠️ A background indexing job for the previous project was cancelled "
+                "but is still winding down; re-run `index_codebase()` for this project."
+            )
+        return "Background indexing job for the previous project was cancelled."
+    except Exception:
+        return None
 
 
 @mcp.tool()
@@ -179,6 +242,8 @@ def set_project_root(path: str) -> str:
     if not target.is_dir():
         return f"Error: Path is not a directory: {path}"
 
+    cancel_note = _stop_background_indexing()
+
     reconfigure(target)
     reset_context()
     _startup_done = False
@@ -186,6 +251,8 @@ def set_project_root(path: str) -> str:
     log(f"Project root changed to: {config.PROJECT_ROOT}")
 
     msg = f"Project root set to: {config.PROJECT_ROOT}"
+    if cancel_note:
+        msg += f"\n{cancel_note}"
     if is_mcp_server_dir(target):
         msg += (
             "\n\n⚠️ Warning: This path is the ProjectMind MCP server's OWN directory. "
@@ -300,6 +367,10 @@ def session_init(project_path: str = "") -> str:
             return f"Error: project_path does not exist: {project_path}"
         if not target.is_dir():
             return f"Error: project_path is not a directory: {project_path}"
+        if target != config.PROJECT_ROOT:
+            cancel_note = _stop_background_indexing()
+            if cancel_note:
+                sections.append(cancel_note)
         reconfigure(target)
         reset_context()
         _startup_done = False
@@ -765,7 +836,10 @@ def explore_directory(path: str = ".", depth: int = 1, max_items: int = 100) -> 
     if count[0] == 0:
         lines.append("(empty directory)")
 
-    memory_mentions = _search_memory_for(header.split("/")[-1] if "/" in header else header)
+    _header_norm = header.replace("\\", "/")
+    memory_mentions = _search_memory_for(
+        _header_norm.split("/")[-1] if "/" in _header_norm else _header_norm
+    )
     if memory_mentions:
         lines.append("\n## Notes from memory")
         for mention in memory_mentions[:5]:
@@ -828,7 +902,7 @@ def get_file_summary(path: str, max_lines: int = 50) -> str:
         except Exception:
             pass
 
-    if target.suffix in config.BINARY_EXTENSIONS:
+    if target.suffix.lower() in config.BINARY_EXTENSIONS:
         result.append("\n(binary file — no preview)")
         return "\n".join(result)
 
@@ -1296,8 +1370,9 @@ def search_with_dependencies(
         metadatas = results.get("metadatas", [[]])[0]
         matching_files = set()
         for meta in metadatas:
-            if "file_path" in meta:
-                matching_files.add(meta["file_path"])
+            rel = _source_rel_path(meta)
+            if rel:
+                matching_files.add(rel)
 
         lines = [f"# SEARCH RESULTS: {query}\n"]
         lines.append(f"Found {len(matching_files)} matching files\n")
@@ -1400,7 +1475,7 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
         # Code matches
         if code_results and code_results.get("documents") and code_results["documents"][0]:
             metadatas = code_results.get("metadatas", [[]])[0]
-            files = {meta.get("file_path", "") for meta in metadatas if meta.get("file_path")}
+            files = {rel for meta in metadatas if (rel := _source_rel_path(meta))}
 
             lines.append("## Related Code")
             for file in sorted(files):
@@ -1414,7 +1489,7 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
             and exception_results["documents"][0]
         ):
             metadatas = exception_results.get("metadatas", [[]])[0]
-            files = {meta.get("file_path", "") for meta in metadatas if meta.get("file_path")}
+            files = {rel for meta in metadatas if (rel := _source_rel_path(meta))}
 
             lines.append("## Error Handlers")
             for file in sorted(files):
@@ -1424,7 +1499,7 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
         # Test matches
         if test_results and test_results.get("documents") and test_results["documents"][0]:
             metadatas = test_results.get("metadatas", [[]])[0]
-            files = {meta.get("file_path", "") for meta in metadatas if meta.get("file_path")}
+            files = {rel for meta in metadatas if (rel := _source_rel_path(meta))}
             test_files = {f for f in files if "test" in f.lower() or "spec" in f.lower()}
 
             if test_files:
@@ -1557,9 +1632,9 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
         from code_intelligence import get_dependencies_with_depth as _get_deps
 
         if main_results and main_results.get("metadatas"):
-            impl_files = [m.get("source") for m in main_results["metadatas"][0] if m.get("source")][
-                :3
-            ]
+            impl_files = [
+                rel for m in main_results["metadatas"][0] if (rel := _source_rel_path(m))
+            ][:3]
             graph = build_import_graph(config.PROJECT_ROOT)
 
             # Find files with no upstream dependencies (potential entry points)
@@ -1622,7 +1697,7 @@ def search_architecture(component: str, n_results: int = 10) -> str:
             return f"No results found for component: {component}"
 
         metadatas = results.get("metadatas", [[]])[0]
-        main_files = [meta.get("file_path") for meta in metadatas if meta.get("file_path")]
+        main_files = [rel for meta in metadatas if (rel := _source_rel_path(meta))]
 
         lines = [f"# ARCHITECTURE: {component}\n"]
 
@@ -1653,6 +1728,116 @@ def search_architecture(component: str, n_results: int = 10) -> str:
 
         return "\n".join(lines)
 
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def find_symbol(name: str, n_results: int = 8) -> str:
+    """
+    Finds where a function/class/method is defined using the AST symbol graph.
+    Works without the vector index (no embedding model needed).
+
+    Args:
+        name: Symbol name — exact or partial (case-insensitive).
+        n_results: Max results (default 8).
+
+    Returns:
+        Definitions with file:line plus caller/callee counts.
+    """
+    ensure_startup()
+    if not name.strip():
+        return "Error: name cannot be empty"
+    try:
+        from symbol_graph import query_symbol_graph
+
+        hits = query_symbol_graph(name.strip(), n_results=n_results)
+        if not hits:
+            return f"No symbols matching '{name}' found. If the project was never indexed, run `index_codebase()` first."
+        lines = [f"# SYMBOLS: {name}\n"]
+        for h in hits:
+            extra = h.get("extra", {})
+            lines.append(
+                f"- **{extra.get('symbol_name', name)}** ({extra.get('symbol_kind', '?')}) — "
+                f"`{h.get('source', '?')}:{extra.get('line', 0)}` "
+                f"[{extra.get('callers', 0)} callers / {extra.get('callees', 0)} callees]"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_symbol_relations(symbol: str, relation: str = "usages") -> str:
+    """
+    Returns AST-level relations of a symbol from the symbol graph.
+
+    Args:
+        symbol: Function/class/method name (bare, e.g. "UserService").
+        relation: One of "usages" (default), "callers", "callees",
+            "implementors", "subclasses", "bases", "info".
+
+    Returns:
+        Related symbols with file:line, or full info for relation="info".
+    """
+    ensure_startup()
+    if not symbol.strip():
+        return "Error: symbol cannot be empty"
+    symbol = symbol.strip()
+    relation = relation.strip().lower()
+    try:
+        import symbol_graph as sg
+
+        if relation == "info":
+            info = sg.get_symbol_info(symbol)
+            if info is None:
+                return f"Symbol '{symbol}' not found in the graph."
+            lines = [
+                f"# SYMBOL: {info['name']} ({info['kind']})",
+                f"**Defined**: `{info['file']}:{info['lines']}`",
+            ]
+            if info.get("parent_class"):
+                lines.append(f"**Class**: {info['parent_class']}")
+            if info.get("base_classes"):
+                lines.append(f"**Inherits**: {', '.join(info['base_classes'])}")
+            if info.get("interfaces"):
+                lines.append(f"**Implements**: {', '.join(info['interfaces'])}")
+            if info.get("other_definitions"):
+                lines.append("\n**Other definitions with the same name:**")
+                for d in info["other_definitions"]:
+                    lines.append(f"- `{d['file']}:{d['line']}`")
+            for key in ("callers", "callees", "subclasses", "implementors"):
+                vals = info.get(key) or []
+                if vals:
+                    lines.append(f"\n**{key.capitalize()}** ({len(vals)}):")
+                    for v in vals[:15]:
+                        lines.append(f"- {v}")
+                    if len(vals) > 15:
+                        lines.append(f"- ... and {len(vals) - 15} more")
+            return "\n".join(lines)
+
+        fetchers = {
+            "usages": sg.find_usages,
+            "callers": sg.find_callers,
+            "callees": sg.find_callees,
+            "implementors": sg.find_implementors,
+            "subclasses": sg.find_subclasses,
+            "bases": sg.find_base_classes,
+        }
+        fetch = fetchers.get(relation)
+        if fetch is None:
+            return f"Error: unknown relation '{relation}'. Use one of: {', '.join(fetchers)} or 'info'."
+
+        rows = fetch(symbol)
+        if not rows:
+            return f"No {relation} found for '{symbol}'."
+        lines = [f"# {relation.upper()} of `{symbol}` ({len(rows)})\n"]
+        for r in rows[:40]:
+            rel_note = f" ({r['relation']})" if r.get("relation") else ""
+            lines.append(f"- **{r['symbol']}**{rel_note} ({r['kind']}) — `{r['file']}:{r['line']}`")
+        if len(rows) > 40:
+            lines.append(f"\n... and {len(rows) - 40} more")
+        return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
 
@@ -2584,13 +2769,13 @@ def analyze_code_complexity(target_path: str = ".", mode: str = "quick") -> str:
         lang_counts: dict[str, int] = {}
 
         supported_exts = set(_LANGUAGE_MAP.keys())
-        all_files = [
-            f
-            for f in target.rglob("*")
-            if f.is_file()
-            and f.suffix.lower() in supported_exts
-            and not any(is_dir_ignored(p) for p in f.relative_to(target).parts[:-1])
-        ]
+        all_files: list[Path] = []
+        for root_dir, dir_names, filenames in os.walk(target):
+            dir_names[:] = [d for d in dir_names if not is_dir_ignored(d)]
+            for fname in filenames:
+                fpath = Path(root_dir) / fname
+                if fpath.suffix.lower() in supported_exts:
+                    all_files.append(fpath)
 
         if not all_files:
             return "No supported files found (Python, JS, TS, Java, Go, Rust, Ruby)"
@@ -2676,9 +2861,7 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
     if (mode or "quick").lower() == "deep":
         max_files = max(max_files, 100)
     try:
-        from io import StringIO
-
-        from pylint.lint import Run
+        import pylint  # noqa: F401
     except ImportError:
         return "Error: pylint not installed. Run: pip install pylint"
 
@@ -2687,12 +2870,12 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
         if not target.exists():
             return f"Path not found: {target_path}"
 
-        py_files = list(target.rglob("*.py"))
-        py_files = [
-            f
-            for f in py_files
-            if not any(is_dir_ignored(p) for p in f.relative_to(target).parts[:-1])
-        ]
+        py_files: list[Path] = []
+        for root_dir, dir_names, filenames in os.walk(target):
+            dir_names[:] = [d for d in dir_names if not is_dir_ignored(d)]
+            for fname in filenames:
+                if fname.endswith(".py"):
+                    py_files.append(Path(root_dir) / fname)
 
         if not py_files:
             return "No Python files found"
@@ -2705,6 +2888,8 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
 
         issues_summary = {"convention": 0, "refactor": 0, "warning": 0, "error": 0}
 
+        import json as _json
+        import subprocess
         import time
 
         from config import get_tool_budget_seconds
@@ -2714,37 +2899,51 @@ def analyze_code_quality(target_path: str = ".", max_files: int = 10, mode: str 
         analyzed = 0
         stopped_early = False
 
-        for py_file in files_to_check:
-            if analyzed > 0 and (time.monotonic() - start) > time_budget:
+        # pylint runs in a SUBPROCESS: running it in-process required swapping
+        # the global sys.stdout, which risks corrupting the MCP stdio protocol
+        # when any other thread writes concurrently.
+        batch_size = 10
+        for batch_start in range(0, len(files_to_check), batch_size):
+            remaining = time_budget - (time.monotonic() - start)
+            if analyzed > 0 and remaining <= 0:
                 stopped_early = True
                 break
+            batch = files_to_check[batch_start : batch_start + batch_size]
+            cmd = [
+                sys.executable,
+                "-m",
+                "pylint",
+                "--output-format=json",
+                "--score=n",
+                *[str(f) for f in batch],
+            ]
             try:
-                old_stdout = sys.stdout
-                old_stderr = sys.stderr
-                sys.stdout = StringIO()
-                sys.stderr = StringIO()
-
-                try:
-                    pylint_output = Run([str(py_file), "--output-format=text"], exit=False)
-                finally:
-                    sys.stdout = old_stdout
-                    sys.stderr = old_stderr
-
-                stats = pylint_output.linter.stats
-                if hasattr(stats, "convention"):
-                    issues_summary["convention"] += stats.convention
-                if hasattr(stats, "refactor"):
-                    issues_summary["refactor"] += stats.refactor
-                if hasattr(stats, "warning"):
-                    issues_summary["warning"] += stats.warning
-                if hasattr(stats, "error"):
-                    issues_summary["error"] += stats.error
-                analyzed += 1
-
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=max(remaining, 10.0),
+                    cwd=str(config.PROJECT_ROOT),
+                )
+            except subprocess.TimeoutExpired:
+                stopped_early = True
+                break
             except Exception:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
                 continue
+
+            try:
+                messages = _json.loads(proc.stdout or "[]")
+            except ValueError:
+                messages = []
+            for msg in messages:
+                mtype = str(msg.get("type", "")).lower()
+                if mtype == "fatal":
+                    mtype = "error"
+                if mtype in issues_summary:
+                    issues_summary[mtype] += 1
+            analyzed += len(batch)
 
         if stopped_early:
             results.append(
@@ -3014,6 +3213,17 @@ def prune_index(force: bool = False) -> str:
             if err:
                 out.append(f"- clear: {err}")
             else:
+                # Reset incremental-index metadata too, otherwise the next
+                # index_changed_files() sees "no changed files" on an empty store.
+                try:
+                    from incremental_indexing import IndexMetadata
+
+                    meta = IndexMetadata()
+                    meta.metadata = {}
+                    meta.save()
+                    out.append("- index metadata reset")
+                except Exception as e:
+                    out.append(f"- index metadata reset failed: {e}")
                 out.append("- collection cleared (run `index_codebase()` to rebuild)")
         except Exception as e:
             out.append(f"- clear failed: {e}")

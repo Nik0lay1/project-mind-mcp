@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.8.0] - 2026-07-02 🛠️ CORRECTNESS OVERHAUL + SYMBOL GRAPH V3
+
+### Security
+- **BM25 index is now JSON** (`.ai/bm25_index.json`), never pickle. The old `.pkl` lived inside the *target* project's `.ai/` dir, so unpickling it was an arbitrary-code-execution vector when indexing third-party repos. Legacy `.pkl` files are deleted on `clear()`.
+
+### Fixed — index hygiene
+- Re-indexing a changed file now **deletes its previous chunks** first (`delete_by_source`), and chunks of deleted files are removed from ChromaDB, BM25 and the metadata — renamed/removed symbols no longer haunt search results forever.
+- **Failed upserts are no longer silent**: index metadata is not saved on failure, so affected files retry on the next run, and the tool output says so.
+- `index_all` now records `IndexMetadata` (previously the next incremental run re-indexed everything); `prune_index(force=True)` resets it (previously `index_changed_files` reported "no changes" against an empty store).
+- Query cache is invalidated on upsert / clear / BM25 rebuild (stale results were served for up to 5 minutes after re-indexing).
+- Chunk IDs include `line_start`, so same-named symbols in one file no longer overwrite each other.
+- mtime is captured *before* reading a file (TOCTOU) and compared with `!=` instead of `>`.
+
+### Fixed — three dead tools
+- `search_with_dependencies`, `search_for_errors`, `search_architecture` read a metadata key (`file_path`) that was never written (the indexer stores `source`) — all three silently returned empty sections. They now read the right key and normalize absolute Windows paths to the relative posix form the import graph uses.
+
+### Fixed — graphs
+- Python import extraction kept only the top-level package (`utils.helpers` → `utils`) and dropped relative imports entirely, making the v0.7.7 resolution machinery dead code. Full dotted/relative specifiers are now preserved.
+- JS/TS import regex now matches multi-line (prettier-wrapped), dynamic `import()`, and side-effect imports.
+- Symbol graph: operator-precedence bug made the call-noise filter accept everything (`print`, `len`, …) — replaced with a builtin blocklist; class nodes no longer double-attribute every call made inside their methods; inheritance extraction now works for JS/TS/Java/Ruby (was Python-only); call refs record the actual call-site line.
+
+### Fixed — Windows & encoding
+- `memory.md` is always read/written as UTF-8 (was locale-dependent: Cyrillic content could be corrupted and written back corrupted); `delete_section` matches headings exactly and writes atomically.
+- `atomic_write` no longer unlinks the target before `os.replace` (which is already atomic on Windows) — no more crash window where the file doesn't exist.
+
+### Fixed — concurrency
+- `get_context()` and `AppContext.get_symbol_graph()` use double-checked locking (two concurrent tools could create two ChromaDB clients + load the model twice).
+- tree-sitter parsing is serialized behind a shared lock (`Parser` objects are not thread-safe; concurrent parses could crash the interpreter).
+- BM25 state swaps atomically under a lock (searches during rebuild saw mismatched id/score arrays).
+- Background indexer initializes the vector store *before* a force-clear (the `session_init` auto-heal reliably died with "ChromaDB client not initialized"); progress dict is lock-protected.
+- `set_project_root` / `session_init` now **cancel a running background index job** before switching roots (a job for project A could write A's chunks into B's store).
+
+### Changed — Symbol Graph v3 (now actually wired in)
+- Symbols are keyed by **qualified id** (`path::Class.name`) — same-named symbols across files no longer collapse into one node; `by_name` index resolves bare names to all definitions.
+- New MCP tools: `find_symbol(name)` and `get_symbol_relations(symbol, relation)` (callers/callees/implementors/subclasses/bases/usages/info).
+- New `L1_symbol` tier in `query()` — exact/substring symbol-name hits fuse with manifest/BM25/vector tiers via RRF (uses `peek_symbol_graph()`, never builds during a search).
+- The background indexer rebuilds the symbol graph after each indexing run; staleness is checked against IndexMetadata mtimes instead of directory sampling.
+
+### Changed — performance
+- **Incremental BM25**: `index_changed_files` patches only the changed files' rows in the in-memory corpus and rebuilds the matrix once — no more full-ChromaDB fetch + full rewrite per small change.
+- `get_module_cluster` / `analyze_change_impact` use a precomputed reverse import graph (were O(N²·E) full-graph rescans per node).
+- `pylint` runs as a subprocess with JSON output (in-process runs swapped the global `sys.stdout`, risking MCP stdio protocol corruption).
+- L2 query timeout actually times out (executor shutdown no longer blocks on the hung worker); memory-pressure relief uses current RSS, not lifetime peak (`ru_maxrss`), so it no longer fires forever after the model loads; manifest staleness respects the 20k-file scan cap (no more perpetual rebuild loop on huge repos).
+
+### Meta
+- `pyproject` `py-modules` now includes `symbol_graph`, `background_indexer`, `manifest`, `maintenance`, `query_router` (pip installs were broken without them); coverage no longer omits the biggest modules (the old 80% gate measured a fraction of the code — threshold reset to an honest 40%); version synced to 0.8.0 in README/pyproject.
+
+---
+
 ## [0.7.8] - 2026-06-08 ⏱️ TOOL TIME BUDGETS (NO MORE TIMEOUTS)
 
 ### Fixed

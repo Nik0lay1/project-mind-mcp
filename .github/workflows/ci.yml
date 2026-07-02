@@ -46,8 +46,11 @@ jobs:
         mypy mcp_server.py config.py logger.py memory_manager.py incremental_indexing.py memory_limited_indexer.py --ignore-missing-imports
 
     - name: Run unit tests (no ML model)
+      # Threshold reflects HONEST coverage: all product modules are now
+      # included in the report (previously the biggest ones were omitted,
+      # inflating the number). Raise as tests grow.
       run: |
-        pytest -m "not integration" --cov=. --cov-report=term-missing --cov-fail-under=80
+        pytest -m "not integration" --cov=. --cov-report=term-missing --cov-fail-under=40
 
   integration:
     name: Integration Tests (slow, ML model)
