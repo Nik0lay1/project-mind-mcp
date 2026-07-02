@@ -105,6 +105,21 @@ class TestMemoryCyrillic:
         assert "## Build Status" in content
         assert "\n## Status" not in content
 
+    def test_delete_section_removes_update_entries(self, tmp_path):
+        from memory_manager import MemoryManager
+
+        # update() stores content under "### Update (<section>)"; deleting by
+        # the section name must remove that generated heading too.
+        mf = tmp_path / "memory.md"
+        mf.write_text("# Project Memory\n\n## Recent Decisions\n- init\n", encoding="utf-8")
+        mm = MemoryManager(memory_file=mf)
+        mm.update("Test section content", section="Test Section")
+        assert "Test section content" in mf.read_text(encoding="utf-8")
+        mm.delete_section("Test Section")
+        content = mf.read_text(encoding="utf-8")
+        assert "Test section content" not in content
+        assert "## Recent Decisions" in content
+
     def test_delete_section_preserves_cyrillic(self, tmp_path):
         from memory_manager import MemoryManager
 

@@ -99,19 +99,27 @@ def get_context() -> AppContext:
             ensure_startup()
             _app_context = AppContext.create_default()
 
-            # Load embedding model in background so it is ready for queries
-            from logger import setup_logger
+            # Preload the embedding model in the background so it is ready for
+            # queries. Skipped under pytest: short-lived test processes exit
+            # while the daemon thread is mid-download/init, which aborts the
+            # interpreter (pthread "exception not rethrown" core dump).
+            import os
 
-            logger = setup_logger()
+            if "PYTEST_CURRENT_TEST" not in os.environ:
+                from logger import setup_logger
 
-            def load_model_bg(ctx: AppContext) -> None:
-                try:
-                    logger.info("Starting background loading of embedding model...")
-                    ctx.vector_store.initialize()
-                except Exception as e:
-                    logger.error(f"Failed to initialize vector store in background: {e}")
+                logger = setup_logger()
 
-            threading.Thread(target=load_model_bg, args=(_app_context,), daemon=True).start()
+                def load_model_bg(ctx: AppContext) -> None:
+                    try:
+                        logger.info("Starting background loading of embedding model...")
+                        ctx.vector_store.initialize()
+                    except Exception as e:
+                        logger.error(f"Failed to initialize vector store in background: {e}")
+
+                threading.Thread(
+                    target=load_model_bg, args=(_app_context,), daemon=True
+                ).start()
 
     return _app_context
 

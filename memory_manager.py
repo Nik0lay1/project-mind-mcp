@@ -272,6 +272,10 @@ class MemoryManager:
             from incremental_indexing import atomic_write
 
             target = section_name.strip().lower()
+            # update() stores entries under "### Update (<section>)" — accept
+            # both the exact heading and that generated form, but never a bare
+            # substring (deleting "Status" must not remove "Build Status").
+            accepted = {target, f"update ({target})"}
             with self._lock:
                 content = self.memory_file.read_text(encoding="utf-8", errors="replace")
                 lines = content.split("\n")
@@ -284,7 +288,7 @@ class MemoryManager:
                     current_level = len(line) - len(stripped) if line.startswith("#") else 0
                     heading_text = stripped.strip().lower() if current_level else ""
 
-                    if current_level >= 2 and heading_text == target:
+                    if current_level >= 2 and heading_text in accepted:
                         skip = True
                         skip_level = current_level
                         continue
