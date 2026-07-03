@@ -80,10 +80,10 @@ jobs:
         path: ~/.cache/huggingface
         key: hf-flax-codesearch-distilroberta-v1
 
-    - name: Install dependencies
+    - name: Install dependencies (with vector stack)
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        pip install -e ".[dev,vector]"
 
     - name: Run integration tests
       run: |

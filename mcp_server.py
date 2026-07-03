@@ -1389,9 +1389,9 @@ def search_with_dependencies(
     try:
         # First do semantic search
         ctx = get_context()
-        coll = ctx.vector_store.get_collection()
+        from vector_store_manager import vector_stack_available
 
-        if coll is None:
+        if vector_stack_available() and ctx.vector_store.get_collection() is None:
             return "Vector store not initialized. Run index_codebase() first."
 
         results = ctx.vector_store.hybrid_query(query_texts=[query], n_results=n_results)
@@ -1479,9 +1479,9 @@ def search_for_errors(error_text: str, stacktrace: str = "", n_results: int = 5)
 
     try:
         ctx = get_context()
-        coll = ctx.vector_store.get_collection()
+        from vector_store_manager import vector_stack_available
 
-        if coll is None:
+        if vector_stack_available() and ctx.vector_store.get_collection() is None:
             return "Vector store not initialized. Run index_codebase() first."
 
         # Combine error and stacktrace for better search
@@ -1592,9 +1592,9 @@ def search_for_feature(feature_name: str, n_results: int = 10) -> str:
 
     try:
         ctx = get_context()
-        coll = ctx.vector_store.get_collection()
+        from vector_store_manager import vector_stack_available
 
-        if coll is None:
+        if vector_stack_available() and ctx.vector_store.get_collection() is None:
             return "Vector store not initialized. Run index_codebase() first."
 
         # Main search
@@ -1718,9 +1718,9 @@ def search_architecture(component: str, n_results: int = 10) -> str:
         from code_intelligence import get_module_cluster as _get_cluster
 
         ctx = get_context()
-        coll = ctx.vector_store.get_collection()
+        from vector_store_manager import vector_stack_available
 
-        if coll is None:
+        if vector_stack_available() and ctx.vector_store.get_collection() is None:
             return "Vector store not initialized. Run index_codebase() first."
 
         # Search for component
@@ -2337,9 +2337,10 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
 
     # ── Synchronous mode (background=False) — legacy blocking behaviour ──────
     from code_intelligence import invalidate_import_graph_cache
+    from vector_store_manager import vector_stack_available
 
     ctx = get_context()
-    if ctx.vector_store.get_collection() is None:
+    if vector_stack_available() and ctx.vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
     ignored_dirs = get_ignored_dirs()
@@ -2775,9 +2776,10 @@ def index_changed_files() -> str:
         Status message with indexing stats
     """
     from code_intelligence import invalidate_import_graph_cache
+    from vector_store_manager import vector_stack_available
 
     ctx = get_context()
-    if ctx.vector_store.get_collection() is None:
+    if vector_stack_available() and ctx.vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
     root_dir = config.PROJECT_ROOT
