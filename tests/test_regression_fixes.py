@@ -190,7 +190,14 @@ class TestIncrementalIndexing:
 
 
 class TestUpsertFailureTracking:
-    def test_failed_upsert_sets_flag_and_raises(self):
+    def test_failed_upsert_sets_flag_and_raises(self, monkeypatch):
+        # Vector-mode behaviour: in BM25-only mode the upserter is a no-op,
+        # so force the vector path regardless of what is installed on CI.
+        import vector_store_manager as vsm
+
+        monkeypatch.setattr(vsm, "_vector_checked", True)
+        monkeypatch.setattr(vsm, "_vector_available", True)
+
         from codebase_indexer import CodebaseIndexer
 
         class FakeStore:
