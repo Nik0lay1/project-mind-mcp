@@ -1,6 +1,10 @@
+# Core (BM25-only mode — no embeddings needed)
 mcp
-chromadb
-sentence-transformers
 langchain-text-splitters
 GitPython
+rank-bm25
+
+# Optional vector stack (semantic embeddings); or: pip install projectmind-mcp[vector]
+chromadb
+sentence-transformers
 numpy<2.0

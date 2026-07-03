@@ -45,6 +45,15 @@ If `session_init` is unavailable:
 Memory__index_changed_files
 ```
 
+### Annotations (make search semantic — no embeddings needed)
+After finishing work on a file, save/refresh its annotation:
+```
+Memory__save_annotation(path, summary="1-2 sentences on purpose", keywords="synonyms, domain terms")
+```
+Periodically check coverage with `Memory__list_unannotated_files()` and annotate
+the backlog. Annotations are what make natural-language queries land on the
+right files.
+
 ### Saving important decisions
 ```
 Memory__update_memory  ←  section: "Recent Decisions", content: "..."

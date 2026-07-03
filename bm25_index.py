@@ -87,20 +87,26 @@ class BM25Index:
         ids: list[str],
         texts: list[str],
         metadatas: list[dict[str, Any]],
+        allow_empty: bool = False,
     ) -> bool:
         """
         Replace all documents of one source file in the in-memory corpus.
 
         Cheap corpus surgery for incremental indexing: drops the file's old
         rows and appends the new ones WITHOUT touching the BM25 matrix —
-        call rebuild_from_corpus() once after all files are updated.
+        the matrix is rebuilt lazily on the next search (or explicitly via
+        rebuild_from_corpus()).
+
+        Args:
+            allow_empty: Permit growing a corpus from scratch. Off by default
+                so the vector-mode incremental path can detect "corpus not
+                loaded" and fall back to a full rebuild from the vector store.
 
         Returns:
-            False when the in-memory corpus is not loaded (caller should fall
-            back to a full rebuild from the vector store).
+            False when the corpus is not loaded and allow_empty is False.
         """
         with self._lock:
-            if not self._ids:
+            if not self._ids and not allow_empty:
                 return False
             keep = [
                 i for i, meta in enumerate(self._metadatas) if (meta or {}).get("source") != source
@@ -129,6 +135,10 @@ class BM25Index:
         self.build(ids, texts, metas)
 
     def search(self, query: str, n: int) -> list[dict[str, Any]]:
+        # Lazy rebuild: update_source() marks the matrix dirty (None) so a
+        # burst of corpus updates costs one rebuild on the next search.
+        if self._bm25 is None and self._ids:
+            self.rebuild_from_corpus()
         with self._lock:
             bm25 = self._bm25
             ids = self._ids
@@ -140,15 +150,27 @@ class BM25Index:
             tokens = query.lower().split()
             scores = bm25.get_scores(tokens)
             top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:n]
+            ranked = [(i, float(scores[i])) for i in top_indices if scores[i] > 0]
+            if not ranked:
+                # Tiny corpora: BM25 idf collapses to 0 when a term appears in
+                # half the docs of a 2-3 doc corpus. Fall back to plain token
+                # overlap so small projects still get keyword results.
+                qset = set(tokens)
+                overlap = []
+                for i, text in enumerate(texts):
+                    common = len(qset & set(text.lower().split()))
+                    if common:
+                        overlap.append((common, i))
+                overlap.sort(key=lambda x: (-x[0], x[1]))
+                ranked = [(i, float(c)) for c, i in overlap[:n]]
             return [
                 {
                     "id": ids[i],
                     "text": texts[i],
                     "metadata": metadatas[i],
-                    "score": float(scores[i]),
+                    "score": s,
                 }
-                for i in top_indices
-                if scores[i] > 0
+                for i, s in ranked
             ]
         except Exception as e:
             logger.error(f"BM25 search failed: {e}")

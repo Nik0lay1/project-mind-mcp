@@ -9,6 +9,30 @@ from logger import get_logger
 
 logger = get_logger()
 
+# Cached probe for the optional vector stack ([vector] extra). The core
+# install runs BM25 + annotations + symbol graph only.
+_vector_checked = False
+_vector_available = False
+
+
+def vector_stack_available() -> bool:
+    """True when chromadb + sentence-transformers are importable."""
+    global _vector_checked, _vector_available
+    if not _vector_checked:
+        import importlib.util
+
+        _vector_available = (
+            importlib.util.find_spec("chromadb") is not None
+            and importlib.util.find_spec("sentence_transformers") is not None
+        )
+        _vector_checked = True
+        if not _vector_available:
+            logger.info(
+                "Vector stack not installed — running in BM25-only mode "
+                "(install `projectmind-mcp[vector]` to enable semantic embeddings)"
+            )
+    return _vector_available
+
 
 class VectorStoreManager:
     """
@@ -32,6 +56,7 @@ class VectorStoreManager:
         self._initialized = False
         self._query_cache = TTLCache(ttl_seconds=300, max_size=100)
         self._bm25_index = BM25Index(config.BM25_INDEX_PATH)
+        self._annotations_merged = False
         self._last_query_at: float = 0.0
         self._loaded_at: float = 0.0
         self._time = _time
@@ -65,6 +90,9 @@ class VectorStoreManager:
         Returns:
             True if initialization successful, False otherwise
         """
+        if not vector_stack_available():
+            return False
+
         if self._initialized and self.collection is not None:
             return True
 
@@ -101,6 +129,7 @@ class VectorStoreManager:
                 self._loaded_at = self._time.time()
                 logger.info("Vector Store initialized successfully")
                 self._bm25_index.load()
+                self.merge_annotations_into_bm25()
                 return True
             except Exception as e:
                 logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
@@ -125,6 +154,14 @@ class VectorStoreManager:
         Returns:
             Error message if failed, None if successful
         """
+        if not vector_stack_available():
+            # BM25-only mode: "the collection" is the keyword corpus.
+            self._bm25_index.clear()
+            self._annotations_merged = False
+            self._query_cache.clear()
+            logger.info("BM25 index cleared (vector stack not installed)")
+            return None
+
         # Initialize (or re-initialize after unload_model) so the collection is
         # recreated with the configured embedding function, not Chroma's default.
         if not self.chroma_client or self.embedding_fn is None:
@@ -139,6 +176,7 @@ class VectorStoreManager:
                 metadata={"hnsw:space": "cosine"},
             )
             self._bm25_index.clear()
+            self._annotations_merged = False
             self._query_cache.clear()
             logger.info(f"Collection '{self.collection_name}' cleared successfully")
             return None
@@ -309,13 +347,59 @@ class VectorStoreManager:
             logger.error(f"Error fetching all documents: {e}")
             return [], [], []
 
+    def _ensure_bm25_ready(self) -> None:
+        """Loads the BM25 corpus from disk and merges annotation docs (idempotent)."""
+        if not self._bm25_index.has_corpus:
+            self._bm25_index.load()
+        self.merge_annotations_into_bm25()
+
+    def merge_annotations_into_bm25(self, force: bool = False) -> int:
+        """
+        Injects AI-authored file annotations into the BM25 corpus as synthetic
+        documents, so natural-language queries match them via keyword search.
+
+        Idempotent per session (guarded by a flag); pass force=True after the
+        annotation store changed.
+        """
+        if self._annotations_merged and not force:
+            return 0
+        try:
+            from annotations import get_store
+
+            ids, texts, metas = get_store().as_documents()
+        except Exception as e:
+            logger.warning(f"Could not merge annotations into BM25: {e}")
+            return 0
+        count = 0
+        for doc_id, text, meta in zip(ids, texts, metas, strict=True):
+            if self._bm25_index.update_source(
+                meta["source"], [doc_id], [text], [meta], allow_empty=True
+            ):
+                count += 1
+        self._annotations_merged = True
+        if count:
+            self._query_cache.clear()
+        return count
+
+    def upsert_bm25_annotation(self, source: str, doc_id: str, text: str, meta: dict) -> None:
+        """
+        Live-update one annotation in the BM25 corpus (matrix rebuilds lazily
+        on the next search). Not persisted here — annotations.json is the
+        source of truth and is re-merged on every load/rebuild.
+        """
+        self._ensure_bm25_ready()
+        self._bm25_index.update_source(source, [doc_id], [text], [meta], allow_empty=True)
+        self._query_cache.clear()
+
     def rebuild_bm25(self) -> None:
-        """Rebuilds BM25 index from all ChromaDB documents and persists it."""
+        """Rebuilds BM25 index from all ChromaDB documents + annotations, persists it."""
         ids, docs, metas = self.get_all_documents()
-        if not ids:
+        self._bm25_index.build(ids, docs, metas)
+        self._annotations_merged = False
+        self.merge_annotations_into_bm25()
+        if not self._bm25_index.has_corpus:
             logger.warning("No documents to build BM25 index from")
             return
-        self._bm25_index.build(ids, docs, metas)
         self._bm25_index.save()
         self._query_cache.clear()
 
@@ -325,12 +409,16 @@ class VectorStoreManager:
         """
         Incrementally replaces one file's documents in the BM25 corpus.
 
-        Returns False when no corpus is loaded — the caller should finalize
-        with a full rebuild instead.
+        In vector mode an unloaded corpus returns False so the caller falls
+        back to a full rebuild from the vector store. In BM25-only mode there
+        is nothing to rebuild from, so growing an empty corpus is allowed.
         """
         if not self._bm25_index.has_corpus:
             self._bm25_index.load()
-        return self._bm25_index.update_source(source, ids, texts, metadatas)
+            self.merge_annotations_into_bm25()
+        return self._bm25_index.update_source(
+            source, ids, texts, metadatas, allow_empty=not vector_stack_available()
+        )
 
     def remove_bm25_source(self, source: str) -> None:
         """Drops one deleted file's documents from the BM25 corpus."""
@@ -345,6 +433,7 @@ class VectorStoreManager:
         `index_changed_files` call from minutes into seconds.
         """
         if incremental_ok and self._bm25_index.has_corpus:
+            self.merge_annotations_into_bm25(force=True)
             self._bm25_index.rebuild_from_corpus()
             self._bm25_index.save()
             self._query_cache.clear()
@@ -371,6 +460,21 @@ class VectorStoreManager:
         Returns:
             Query results in ChromaDB format or None if failed
         """
+        if not vector_stack_available():
+            # BM25-only mode: keyword search over chunks + annotations.
+            if where or where_document:
+                return None  # metadata filters require the vector store
+            self._ensure_bm25_ready()
+            items = self._bm25_index.search(query_texts[0], n=n_results)
+            self._last_query_at = self._time.time()
+            return {
+                "ids": [[it["id"] for it in items]],
+                "documents": [[it["text"] for it in items]],
+                "metadatas": [[it["metadata"] for it in items]],
+                # No measured semantic distance in keyword-only mode
+                "distances": [[0.5 for _ in items]],
+            }
+
         if where or where_document or not self._bm25_index.is_ready:
             return self.query(query_texts, n_results, where, where_document)
 

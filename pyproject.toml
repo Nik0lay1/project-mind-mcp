@@ -1,21 +1,32 @@
 [project]
-name = "projectmind"
-version = "0.8.0"
-description = "Local Context & Memory MCP Server with RAG capabilities"
+name = "projectmind-mcp"
+version = "0.9.0"
+description = "Give your AI coding assistant a brain: persistent memory, hybrid code search, AI-authored annotations, and an AST symbol graph — 100% local MCP server, no API keys."
 authors = [
     {name = "Mykola Riabokon"}
 ]
+license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
+keywords = ["mcp", "model-context-protocol", "code-search", "claude", "ai-memory", "bm25", "symbol-graph"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+]
+# Core install is lightweight: BM25 + annotations + symbol graph + memory.
+# The embedding/vector stack is the optional [vector] extra.
 dependencies = [
     "mcp>=0.1.0",
-    "chromadb>=1.0.0",
-    "sentence-transformers>=2.2.0",
     "langchain-text-splitters>=0.0.1",
     "GitPython>=3.1.0",
     "radon>=6.0.0",
     "pylint>=3.0.0",
-    "numpy>=1.26,<2.0",
     "tree-sitter>=0.25.0",
     "tree-sitter-python>=0.25.0",
     "tree-sitter-javascript>=0.25.0",
@@ -28,6 +39,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+vector = [
+    "chromadb>=1.0.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.26,<2.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -38,6 +54,16 @@ dev = [
     "pre-commit>=3.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Nik0lay1/project-mind-mcp"
+Repository = "https://github.com/Nik0lay1/project-mind-mcp"
+Changelog = "https://github.com/Nik0lay1/project-mind-mcp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Nik0lay1/project-mind-mcp/issues"
+
+[project.scripts]
+projectmind-mcp = "mcp_server:main"
+projectmind = "mcp_server:main"
+
 [build-system]
 requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -45,6 +71,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = [
     "mcp_server",
+    "annotations",
     "ast_splitter",
     "background_indexer",
     "bm25_index",

@@ -125,6 +125,10 @@ def _check_model_loaded() -> str | None:
 
     Must be called *after* _check_index_ready() (which confirms the SQLite DB exists).
     """
+    from vector_store_manager import vector_stack_available
+
+    if not vector_stack_available():
+        return None  # BM25-only mode — no model to load
     try:
         vs = get_context().vector_store
         if not vs.is_loaded():
@@ -139,6 +143,17 @@ def _check_model_loaded() -> str | None:
 def _check_index_ready() -> str | None:
     """Returns an error message string if the index is not ready, or None if OK."""
     import sqlite3
+
+    from vector_store_manager import vector_stack_available
+
+    if not vector_stack_available():
+        # BM25-only mode: the keyword corpus is the index
+        if config.BM25_INDEX_PATH.exists():
+            return None
+        return (
+            "⚠️ INDEX NOT BUILT (BM25-only mode). Run `index_codebase()` first "
+            "to build the keyword index, then retry this tool."
+        )
 
     vector_db_path = config.VECTOR_STORE_DIR / "chroma.sqlite3"
     if not vector_db_path.exists():
@@ -263,8 +278,22 @@ def set_project_root(path: str) -> str:
 
 
 def _count_index_chunks() -> int | None:
-    """Returns chunk count or None if vector store is missing/unreadable."""
+    """Returns chunk count or None if the index is missing/unreadable."""
     import sqlite3
+
+    from vector_store_manager import vector_stack_available
+
+    if not vector_stack_available():
+        # BM25-only mode: count keyword-corpus documents instead
+        try:
+            import json as _json
+
+            if not config.BM25_INDEX_PATH.exists():
+                return None
+            data = _json.loads(config.BM25_INDEX_PATH.read_text(encoding="utf-8"))
+            return len(data.get("ids", []))
+        except Exception:
+            return None
 
     vector_db_path = config.VECTOR_STORE_DIR / "chroma.sqlite3"
     if not vector_db_path.exists():
@@ -282,7 +311,10 @@ def _server_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("projectmind")
+        try:
+            return version("projectmind-mcp")
+        except Exception:
+            return version("projectmind")
     except Exception:
         try:
             import tomllib
@@ -1844,6 +1876,161 @@ def get_symbol_relations(symbol: str, relation: str = "usages") -> str:
 
 
 @mcp.tool()
+def save_annotation(path: str, summary: str, keywords: str = "") -> str:
+    """
+    Saves an AI-authored annotation (summary + keywords) for a source file.
+
+    Annotations make keyword search semantic WITHOUT embeddings: your summary
+    is indexed into BM25, so natural-language queries like "where is auth
+    handled" match it. Write annotations for files you have just read or
+    changed — 1-2 sentences on what the file does and why it exists.
+
+    Args:
+        path: File path relative to project root (or absolute inside it).
+        summary: 1-3 sentences: purpose, key responsibilities, notable design.
+        keywords: Comma-separated search terms a developer might query
+            (synonyms, domain words not present in identifiers).
+
+    Returns:
+        Confirmation with annotation coverage stats.
+    """
+    ensure_startup()
+    if not summary.strip():
+        return "Error: summary cannot be empty"
+    try:
+        from annotations import get_store
+
+        store = get_store()
+        kw = [k for k in (s.strip() for s in keywords.split(",")) if k]
+        ann = store.set(path, summary, kw)
+
+        # Live-update the keyword corpus so the annotation is searchable now
+        try:
+            ctx = get_context()
+            ctx.vector_store.upsert_bm25_annotation(
+                ann.path,
+                ann.doc_id,
+                ann.search_text(),
+                {
+                    "source": ann.path,
+                    "symbol_type": "annotation",
+                    "symbol_name": Path(ann.path).stem,
+                },
+            )
+        except Exception as e:
+            log(f"Annotation saved but BM25 update failed: {e}")
+
+        total = store.count()
+        return (
+            f"Annotation saved for `{ann.path}` ({len(ann.keywords)} keywords). "
+            f"Project now has {total} annotated files. "
+            "It is immediately searchable via search_codebase()/query()."
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error saving annotation: {e}"
+
+
+@mcp.tool()
+def get_annotations(path: str = "") -> str:
+    """
+    Reads file annotations.
+
+    Args:
+        path: Specific file to read the annotation for. Empty = coverage
+            overview with all annotated files.
+
+    Returns:
+        The annotation (or coverage summary) in Markdown.
+    """
+    ensure_startup()
+    try:
+        from annotations import get_store
+
+        store = get_store()
+        if path.strip():
+            ann = store.get(path)
+            if ann is None:
+                return f"No annotation for `{path}`. Use save_annotation() to add one."
+            stale = " ⚠️ STALE (file changed since annotation)" if store.is_stale(ann) else ""
+            lines = [
+                f"# ANNOTATION: `{ann.path}`{stale}",
+                "",
+                ann.summary,
+            ]
+            if ann.keywords:
+                lines.append(f"\n**Keywords**: {', '.join(ann.keywords)}")
+            lines.append(f"**Updated**: {ann.updated_at}")
+            return "\n".join(lines)
+
+        anns = store.all()
+        if not anns:
+            return (
+                "No annotations yet. Use `list_unannotated_files()` to see candidates "
+                "and `save_annotation(path, summary, keywords)` to add them."
+            )
+        lines = [f"# ANNOTATIONS ({len(anns)} files)\n"]
+        for rel in sorted(anns):
+            ann = anns[rel]
+            stale = " ⚠️" if store.is_stale(ann) else ""
+            lines.append(f"- `{rel}`{stale} — {ann.summary[:100]}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading annotations: {e}"
+
+
+@mcp.tool()
+def list_unannotated_files(limit: int = 20) -> str:
+    """
+    Lists code files that have no annotation (or a stale one), so you can
+    annotate them with save_annotation().
+
+    Recommended workflow: after finishing work on a file, save/refresh its
+    annotation; periodically run this tool and annotate the backlog — that is
+    what makes natural-language search over this project accurate.
+
+    Args:
+        limit: Max files per category (default 20).
+
+    Returns:
+        Missing and stale annotation lists + coverage stats.
+    """
+    ensure_startup()
+    if limit < 1:
+        limit = 1
+    if limit > 200:
+        limit = 200
+    try:
+        from annotations import get_store
+
+        store = get_store()
+        missing, stale, scanned = store.unannotated(limit=limit)
+        annotated = store.count()
+
+        lines = ["# ANNOTATION COVERAGE\n"]
+        lines.append(f"**Annotated**: {annotated} | **Code files scanned**: {scanned}")
+
+        if missing:
+            lines.append(f"\n## Missing ({len(missing)} shown)")
+            for rel in missing:
+                lines.append(f"- `{rel}`")
+        if stale:
+            lines.append(f"\n## Stale — file changed since annotation ({len(stale)} shown)")
+            for rel in stale:
+                lines.append(f"- `{rel}`")
+        if not missing and not stale:
+            lines.append("\n✅ Every scanned code file has an up-to-date annotation.")
+        else:
+            lines.append(
+                "\n_Read each file and call " "`save_annotation(path, summary, keywords)` for it._"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error scanning annotations: {e}"
+
+
+@mcp.tool()
 def save_conventions_to_memory() -> str:
     """
     Detects project conventions and saves them to memory.md automatically.
@@ -3271,7 +3458,8 @@ def _ensure_default_indexignore() -> None:
         log(f"Could not create default .indexignore: {e}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Console entry point (`uvx projectmind-mcp` / `projectmind`)."""
     ensure_startup()
     _ensure_default_indexignore()
     try:
@@ -3281,3 +3469,7 @@ if __name__ == "__main__":
     except Exception as e:
         log(f"Maintenance daemon could not be started: {e}")
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

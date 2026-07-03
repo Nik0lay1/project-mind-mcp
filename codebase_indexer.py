@@ -58,6 +58,10 @@ class CodebaseIndexer:
             self.failed = False
 
         def __call__(self, documents: list[str], metadatas: list[dict], ids: list[str]) -> None:
+            from vector_store_manager import vector_stack_available
+
+            if not vector_stack_available():
+                return  # BM25-only mode: chunks reach BM25 via on_chunks
             for i in range(0, len(documents), BATCH_SIZE):
                 end = min(i + BATCH_SIZE, len(documents))
                 ok = self.vector_store.upsert(
@@ -285,9 +289,22 @@ class CodebaseIndexer:
 
         file_count = 0
 
+        # Without the vector stack, chunks flow straight into the BM25 corpus.
+        from vector_store_manager import vector_stack_available
+
+        bm25_direct = not vector_stack_available()
+
         for i, file_path in enumerate(indexable_files):
+            on_chunks = None
+            if bm25_direct:
+
+                def on_chunks(
+                    texts: list[str], metas: list[dict], cids: list[str], _fp=file_path
+                ) -> None:
+                    self.vector_store.update_bm25_source(str(_fp), cids, texts, metas)
+
             if self.process_file_with_metadata(
-                file_path, indexer, metadata, delete_stale=not force
+                file_path, indexer, metadata, delete_stale=not force, on_chunks=on_chunks
             ):
                 file_count += 1
             # Progress reporting
@@ -314,7 +331,7 @@ class CodebaseIndexer:
         metadata.save()
 
         logger.info("Rebuilding BM25 index...")
-        self.vector_store.rebuild_bm25()
+        self.vector_store.finalize_bm25(incremental_ok=bm25_direct)
 
         stats = indexer.get_stats()
         warning = (

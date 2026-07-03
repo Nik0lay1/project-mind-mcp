@@ -255,15 +255,20 @@ class BackgroundIndexer:
 
         # ── Phase 2: initialise vector store (loads SentenceTransformer) ────
         from context import get_context
+        from vector_store_manager import vector_stack_available
 
         ctx = get_context()
+        bm25_direct = not vector_stack_available()
 
-        # Initialise BEFORE clearing: clear_collection on a cold client would
-        # fail (or recreate the collection without the embedding function).
-        collection = ctx.vector_store.get_collection()
-        if collection is None:
-            cls._update(status="error", last_error="Failed to initialise vector store.")
-            return
+        if bm25_direct:
+            logger.info("BackgroundIndexer: vector stack not installed — BM25-only indexing")
+        else:
+            # Initialise BEFORE clearing: clear_collection on a cold client would
+            # fail (or recreate the collection without the embedding function).
+            collection = ctx.vector_store.get_collection()
+            if collection is None:
+                cls._update(status="error", last_error="Failed to initialise vector store.")
+                return
 
         if force:
             logger.info("BackgroundIndexer: clearing existing index (force=True)")
@@ -301,8 +306,16 @@ class BackgroundIndexer:
                 cls._update(status="idle", last_error="Cancelled during indexing")
                 return
 
+            on_chunks = None
+            if bm25_direct:
+
+                def on_chunks(
+                    texts: list[str], metas: list[dict], cids: list[str], _fp=file_path
+                ) -> None:
+                    ctx.vector_store.update_bm25_source(str(_fp), cids, texts, metas)
+
             if indexer.process_file_with_metadata(
-                file_path, mem_indexer, metadata, delete_stale=not force
+                file_path, mem_indexer, metadata, delete_stale=not force, on_chunks=on_chunks
             ):
                 file_count += 1
 
@@ -351,7 +364,7 @@ class BackgroundIndexer:
         metadata.save()
 
         logger.info("BackgroundIndexer: rebuilding BM25 index...")
-        ctx.vector_store.rebuild_bm25()
+        ctx.vector_store.finalize_bm25(incremental_ok=bm25_direct)
 
         invalidate_import_graph_cache()
 

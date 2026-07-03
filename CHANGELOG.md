@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.0] - 2026-07-03 ✍️ AI-AUTHORED ANNOTATIONS + LIGHTWEIGHT CORE + PyPI
+
+### Added — annotations (semantic search without embeddings)
+- New `annotations.py` + `.ai/annotations.json`: the client LLM saves 1-2 sentence summaries + keywords per file (`save_annotation`), reviews them (`get_annotations`) and tracks coverage (`list_unannotated_files`, with staleness detection via file mtime).
+- Annotations are indexed into the BM25 corpus as synthetic documents (merged on load and on every rebuild) and served by a new near-free `L0_annot` tier in `query()` — natural-language queries land on the right files via plain keyword search. The design follows the industry lesson that a smart model + precise cheap tools beats a small embedding model guessing.
+
+### Changed — the vector stack is now optional
+- `chromadb`, `sentence-transformers` and the numpy pin moved to the `[vector]` extra. The default install is a few MB: BM25 (chunks + annotations), symbol graph, import graph, memory.
+- Full **BM25-only mode**: indexing (foreground + background + incremental) feeds the keyword corpus directly, `hybrid_query` serves BM25 results, `index_codebase(force=True)` clears the corpus, readiness checks and chunk counts read the BM25 index. Everything degrades gracefully; installing the extra upgrades in place.
+- BM25 small-corpus fallback: when idf collapses to 0 (2-3 doc corpora), search falls back to token-overlap ranking instead of returning nothing.
+- BM25 matrix now rebuilds lazily after corpus updates (one rebuild per burst instead of per file).
+
+### Added — PyPI packaging
+- Published as **`projectmind-mcp`**: `claude mcp add --scope user Memory -- uvx projectmind-mcp` (add `[vector]` for embeddings). Console scripts `projectmind-mcp` / `projectmind`; `main()` entry point.
+- `.github/workflows/publish.yml`: build + twine check + publish on GitHub Release via PyPI Trusted Publishing (no token in repo).
+- Proper metadata: license, classifiers, keywords, project URLs.
+
+---
+
 ## [0.8.0] - 2026-07-02 🛠️ CORRECTNESS OVERHAUL + SYMBOL GRAPH V3
 
 ### Security

@@ -149,6 +149,33 @@ def _tier_l1(query: str, n: int) -> list[QueryHit]:
     return hits
 
 
+def _tier_annotations(query: str, n: int) -> list[QueryHit]:
+    """
+    AI-annotation tier: keyword-overlap scoring over `.ai/annotations.json`.
+
+    Annotations are natural-language summaries written by the client LLM, so
+    this cheap tier is what makes plain-language queries ("where is auth
+    handled") land on the right files without any vector store.
+    """
+    try:
+        from annotations import get_store
+
+        raw = get_store().search(query, n=n)
+    except Exception as e:
+        logger.warning(f"Annotation tier failed: {e}")
+        return []
+    return [
+        QueryHit(
+            source=item.get("source", ""),
+            score=float(item.get("score", 0.0)),
+            tier="L0_annot",
+            snippet=item.get("snippet", ""),
+            extra=item.get("extra", {}),
+        )
+        for item in raw
+    ]
+
+
 def _tier_l1_symbol(query: str, n: int) -> list[QueryHit]:
     """
     Symbol-graph tier: exact/substring matches on function/class/method names.
@@ -326,6 +353,12 @@ def query(
     if l0:
         tiers_used.append("L0")
         buckets.append(l0)
+
+    # Annotation tier: near-free, high signal for natural-language queries
+    l0a = _tier_annotations(user_query, n=max(n_results, 8))
+    if l0a:
+        tiers_used.append("L0_annot")
+        buckets.append(l0a)
 
     if intent == "overview":
         merged = _merge_hits(buckets, n_results)

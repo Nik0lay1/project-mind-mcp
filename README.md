@@ -5,7 +5,8 @@
 [![CI](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.8.0-orange)
+![Version](https://img.shields.io/badge/version-0.9.0-orange)
+[![PyPI](https://img.shields.io/pypi/v/projectmind-mcp)](https://pypi.org/project/projectmind-mcp/)
 
 **ProjectMind** is an open-source [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that supercharges AI assistants like Claude, Zencoder, and Cursor with long-term project memory and intelligent codebase search.
 
@@ -23,7 +24,9 @@ Every time you start a new AI session, your assistant forgets everything about y
 - **Dependency graph analysis** to understand how modules connect
 - **Works 100% locally** — your code never leaves your machine
 
-📝 See [CHANGELOG.md](CHANGELOG.md) for the full release history — v0.8.0 is a major correctness overhaul (index hygiene, Symbol Graph v3, incremental BM25, Windows/UTF-8 robustness, thread-safety, and a pickle→JSON security fix).
+**New in v0.9.0**: ✍️ AI-authored annotations (semantic search without embeddings), 📦 lightweight core with the vector stack as an optional `[vector]` extra, 🚀 one-line install from [PyPI](https://pypi.org/project/projectmind-mcp/).
+
+📝 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 
@@ -45,9 +48,10 @@ Queries escalate through tiers only when the previous one is insufficient — la
 | Tier | Engine | When used | Typical latency |
 |---|---|---|---|
 | **L0 Manifest** | `.ai/manifest.json` (paths + whole-file symbols) | always | < 50 ms |
+| **L0 Annotations** | `.ai/annotations.json` (AI-written summaries) | always | < 5 ms |
 | **L1 Symbol** | `.ai/symbol_graph.json` (AST symbol names) | when a prebuilt graph exists | < 10 ms |
-| **L1 BM25** | `rank-bm25` lexical index | when L0 is weak | ~ 100 ms |
-| **L2 Vector** | ChromaDB + sentence-transformers | only on `intent='semantic'/'deep'` | first call ~ 30 s, then cached |
+| **L1 BM25** | `rank-bm25` lexical index (chunks + annotations) | when L0 is weak | ~ 100 ms |
+| **L2 Vector** | ChromaDB + sentence-transformers (**optional** `[vector]` extra) | only on `intent='semantic'/'deep'` | first call ~ 30 s, then cached |
 
 Use the unified `query(text, intent, n_results)` tool with one of:
 - `overview` — L0 only (paths + top-level symbols)
@@ -56,6 +60,22 @@ Use the unified `query(text, intent, n_results)` tool with one of:
 - `deep` — all tiers with relaxed thresholds
 
 Hits from every tier are fused with **scale-invariant Reciprocal Rank Fusion** (normalized to 0..1), so no single tier can dominate the ranking by raw score magnitude — results corroborated across tiers float to the top.
+
+### ✍️ AI-Authored Annotations — semantic search without embeddings
+The killer pattern: your AI assistant *already understands your code* — so let it write the search index. As the assistant works on files, it saves 1-2 sentence summaries + keywords via `save_annotation()`. Annotations are indexed into BM25 and a dedicated query tier, so natural-language queries land on the right files with plain keyword search:
+
+```
+save_annotation("src/auth/session.py",
+    "Session lifecycle: creates, refreshes and revokes OAuth sessions",
+    keywords="login, oauth, token refresh")
+
+query("where are sessions revoked?")  →  src/auth/session.py  (L0_annot tier)
+```
+
+- `list_unannotated_files()` — coverage report: files missing or with stale annotations (file changed since)
+- `get_annotations(path)` — review what the index "knows" about a file
+- Stored in human-readable `.ai/annotations.json`, UTF-8, atomic writes
+- This is why the vector stack is now optional: a smart model + cheap precise tools beats a small embedding model guessing
 
 ### 🧬 Symbol Graph (AST-level call/inherit/implement graph)
 tree-sitter parses every source file into a graph of *symbols*, not files. Symbols are keyed by qualified id (`path::Class.method`), so same-named symbols across files stay distinct.
@@ -139,46 +159,44 @@ Both `analyze_code_complexity` and `analyze_code_quality` accept `mode='quick'` 
 
 ## Quick Start
 
-### 1. Clone and install
+### One-liner (recommended)
+
+```bash
+# Claude Code
+claude mcp add --scope user Memory -- uvx projectmind-mcp
+```
+
+The default install is **lightweight** (a few MB — BM25 keyword search, AI annotations, symbol graph, memory). To add the optional embedding/vector tier (~500 MB, fully local):
+
+```bash
+claude mcp add --scope user Memory -- uvx --from "projectmind-mcp[vector]" projectmind-mcp
+```
+
+**Other MCP clients (Claude Desktop / Zencoder / Cursor)** — `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "Memory": {
+      "command": "uvx",
+      "args": ["projectmind-mcp"]
+    }
+  }
+}
+```
+
+### From source (development)
 
 ```bash
 git clone https://github.com/Nik0lay1/project-mind-mcp.git
 cd project-mind-mcp
 python -m venv .venv
 
-# Windows
-.venv\Scripts\pip install -e .
-
-# macOS/Linux
-.venv/bin/pip install -e .
+# Windows                          # macOS/Linux
+.venv\Scripts\pip install -e ".[vector,dev]"   # .venv/bin/pip install -e ".[vector,dev]"
 ```
 
-### 2. Add to your MCP client
-
-**Zencoder / Claude Desktop / Claude Code** — add to `mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "Memory": {
-      "command": "/path/to/project-mind-mcp/.venv/bin/python",
-      "args": ["/path/to/project-mind-mcp/mcp_server.py"]
-    }
-  }
-}
-```
-
-**Windows example:**
-```json
-{
-  "mcpServers": {
-    "Memory": {
-      "command": "F:\\Projects\\project-mind-mcp\\.venv\\Scripts\\python.exe",
-      "args": ["F:\\Projects\\project-mind-mcp\\mcp_server.py"]
-    }
-  }
-}
-```
+Then point your MCP client at `.venv/Scripts/python.exe mcp_server.py` (or use the `projectmind-mcp` console script from the venv).
 
 ### 3. Bootstrap a session
 
@@ -206,6 +224,7 @@ If the index doesn't exist yet, background indexing starts automatically — che
 | **Session** | `session_init`, `health`, `set_project_root` |
 | **Memory** | `read_memory`, `read_memory_index`, `read_memory_section`, `search_memory`, `update_memory`, `clear_memory`, `save_memory_version` |
 | **Search** | `query` (tier-aware), `search_codebase`, `search_for_feature`, `search_architecture`, `search_for_errors`, `search_with_dependencies` |
+| **Annotations** | `save_annotation`, `get_annotations`, `list_unannotated_files` |
 | **Symbols** | `find_symbol`, `get_symbol_relations` (callers / callees / implementors / subclasses / bases / usages) |
 | **Exploration** | `get_project_overview`, `explore_directory`, `get_file_summary` |
 | **Dependencies** | `get_file_relations`, `get_dependencies_with_depth`, `get_module_cluster`, `find_dependency_path`, `analyze_change_impact` |
@@ -228,6 +247,7 @@ Your Project
 ProjectMind MCP Server
      │
      ├── .ai/memory.md                ← persistent notes & decisions (UTF-8)
+     ├── .ai/annotations.json         ← AI-written file summaries (search tier)
      ├── .ai/manifest.json            ← L0: paths, symbols, modules (≤200 KB)
      ├── .ai/symbol_graph.json        ← L1: AST call/inherit/implement graph
      ├── .ai/bm25_index.json          ← L1: lexical index (JSON, not pickle)
