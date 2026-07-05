@@ -224,6 +224,7 @@ If the index doesn't exist yet, background indexing starts automatically — che
 | **Session** | `session_init`, `health`, `set_project_root` |
 | **Memory** | `read_memory`, `read_memory_index`, `read_memory_section`, `search_memory`, `update_memory`, `clear_memory`, `save_memory_version` |
 | **Search** | `query` (tier-aware), `search_codebase`, `search_for_feature`, `search_architecture`, `search_for_errors`, `search_with_dependencies` |
+| **Context brief** | `get_context_brief` — ranked, budget-packed brief for a coding task: hybrid retrieval + 1-hop import graph + file skeletons + git recency; zero LLM calls (the "scout pyramid" layer 0) |
 | **Annotations** | `save_annotation`, `get_annotations`, `list_unannotated_files` |
 | **Symbols** | `find_symbol`, `get_symbol_relations` (callers / callees / implementors / subclasses / bases / usages) |
 | **Exploration** | `get_project_overview`, `explore_directory`, `get_file_summary` |

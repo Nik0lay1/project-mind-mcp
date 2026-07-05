@@ -1054,6 +1054,38 @@ def detect_project_conventions() -> str:
 
 
 @mcp.tool()
+def get_context_brief(
+    task: str,
+    budget_tokens: int = 4000,
+    hint_files: list[str] | None = None,
+    hint_symbols: list[str] | None = None,
+) -> str:
+    """
+    Deterministic CONTEXT BRIEF for a coding task — the scout pyramid, layer 0.
+    Combines hybrid retrieval (vector/BM25), one-hop import-graph expansion,
+    file skeletons from the manifest and git recency into a ranked, budget-
+    packed markdown brief. Zero LLM calls, typically <500ms.
+
+    Args:
+        task: The coding task in natural language.
+        budget_tokens: Approximate token budget for the brief (default 4000).
+        hint_files: File paths explicitly mentioned in the task (client-extracted).
+        hint_symbols: Identifiers/symbols mentioned in the task (client-extracted).
+
+    Returns:
+        Markdown brief: ranked files with symbols, import relations and
+        top excerpts. Empty string when nothing relevant is indexed yet.
+    """
+    ensure_startup()
+    try:
+        from context_brief import build_context_brief
+
+        return build_context_brief(task, budget_tokens, hint_files, hint_symbols)
+    except Exception as e:
+        return f"Error building context brief: {e}"
+
+
+@mcp.tool()
 def get_file_relations(path: str) -> str:
     """
     Shows import relationships for a file: what it imports, what imports it,

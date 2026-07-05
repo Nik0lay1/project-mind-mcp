@@ -36,6 +36,7 @@ This single call:
 - `Memory__search_for_feature("feature name")` — find where a feature is implemented
 - `Memory__search_codebase("query")` — semantic search by meaning
 - `Memory__search_architecture("module")` — understand module structure
+- `Memory__get_context_brief("task", budget_tokens=4000)` — deterministic ranked context brief for a coding task (hybrid search + import graph + skeletons), zero LLM calls
 - `Memory__get_file_relations("path/to/file")` — what imports / is imported by a file
 - `Memory__get_dependencies_with_depth("path/to/file", depth=2)` — dependency graph
 

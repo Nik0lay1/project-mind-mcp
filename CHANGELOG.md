@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.1] - 2026-07-05 🔎 CONTEXT BRIEF (scout pyramid, layer 0)
+
+### Added
+- New tool **`get_context_brief(task, budget_tokens=4000, hint_files=[], hint_symbols=[])`** (`context_brief.py`): a deterministic, zero-LLM CONTEXT BRIEF for a coding task. Combines hybrid retrieval (vector or BM25) for the task text and client-extracted hint symbols, one-hop expansion over the static import graph (dependents count as centrality), file skeletons from the manifest (symbol names, no bodies), and git recency boost; results are ranked and greedily packed into the token budget (top-3 always included). Explicit `hint_files` from the client (file mentions, stack-trace frames) are the strongest signal.
+- Purpose: the ProjectMind UI "scout pyramid" — the frontier Planner consumes this brief instead of reading raw files, cutting frontier input cost ~8x on cold tasks. Every subsystem is best-effort: no vector store, no manifest or no git degrades gracefully to whatever remains.
+
 ## [0.9.0] - 2026-07-03 ✍️ AI-AUTHORED ANNOTATIONS + LIGHTWEIGHT CORE + PyPI
 
 ### Added — annotations (semantic search without embeddings)
