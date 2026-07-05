@@ -72,6 +72,7 @@ build-backend = "setuptools.build_meta"
 py-modules = [
     "mcp_server",
     "annotations",
+    "context_brief",
     "ast_splitter",
     "background_indexer",
     "bm25_index",
