@@ -5,7 +5,7 @@
 [![CI](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.9.0-orange)
+![Version](https://img.shields.io/badge/version-0.10.0-orange)
 [![PyPI](https://img.shields.io/pypi/v/projectmind-mcp)](https://pypi.org/project/projectmind-mcp/)
 
 **ProjectMind** is an open-source [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that supercharges AI assistants like Claude, Zencoder, and Cursor with long-term project memory and intelligent codebase search.
@@ -24,7 +24,7 @@ Every time you start a new AI session, your assistant forgets everything about y
 - **Dependency graph analysis** to understand how modules connect
 - **Works 100% locally** — your code never leaves your machine
 
-**New in v0.9.0**: ✍️ AI-authored annotations (semantic search without embeddings), 📦 lightweight core with the vector stack as an optional `[vector]` extra, 🚀 one-line install from [PyPI](https://pypi.org/project/projectmind-mcp/).
+**New in v0.10.0**: 🧭 one shared file-selection path — `.indexignore` now governs the symbol graph and the manifest too, so generated output (`.next`, `dist`) stops crowding out your source; partial graphs report *why* instead of answering "no symbols found".
 
 📝 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 

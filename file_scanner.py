@@ -30,7 +30,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import time as _time_module
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,7 +67,7 @@ class ScanResult:
     def __len__(self) -> int:
         return len(self.files)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Path]:
         return iter(self.files)
 
 
@@ -218,8 +218,7 @@ def scan_files(
 
             if max_files is not None and len(result.files) >= max_files:
                 result.truncated = (
-                    f"file limit reached ({max_files} files); "
-                    "part of the tree was not scanned"
+                    f"file limit reached ({max_files} files); " "part of the tree was not scanned"
                 )
                 result.elapsed_seconds = _time_module.monotonic() - t_start
                 return result

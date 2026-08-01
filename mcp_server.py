@@ -1896,10 +1896,7 @@ def find_symbol(name: str, n_results: int = 8) -> str:
                     "Exclude generated directories in `.indexignore`, then re-run "
                     "`index_codebase(force=True)`."
                 )
-            return (
-                f"No symbols matching '{name}' found. "
-                f"Symbol graph: {graph.status_line()}."
-            )
+            return f"No symbols matching '{name}' found. " f"Symbol graph: {graph.status_line()}."
         lines = [f"# SYMBOLS: {name}\n"]
         for h in hits:
             extra = h.get("extra", {})

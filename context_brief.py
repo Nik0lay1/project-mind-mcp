@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import config
 from logger import setup_logger
@@ -188,7 +187,9 @@ def build_context_brief(
     used = len(lines[0])
     excerpts_used = 0
     for i, c in enumerate(ranked, 1):
-        block: list[str] = [f"\n### {i}. {c.path}  (score {c.score:.1f}; {', '.join(c.reasons) or 'candidate'})"]
+        block: list[str] = [
+            f"\n### {i}. {c.path}  (score {c.score:.1f}; {', '.join(c.reasons) or 'candidate'})"
+        ]
         if c.symbols:
             block.append(f"symbols: {', '.join(c.symbols)}")
         if c.imported_by:

@@ -101,7 +101,9 @@ class BackgroundIndexer:
     # -----------------------------------------------------------------------
 
     @classmethod
-    def start(cls, force: bool = False, preempt: bool = False, preempt_timeout: float = 15.0) -> bool:
+    def start(
+        cls, force: bool = False, preempt: bool = False, preempt_timeout: float = 15.0
+    ) -> bool:
         """
         Start background indexing unless one is already running.
 

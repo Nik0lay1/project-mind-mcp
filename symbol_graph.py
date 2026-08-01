@@ -59,6 +59,7 @@ def build_in_progress() -> bool:
     """True while a symbol graph build is running in some thread."""
     return _build_in_progress.is_set()
 
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------

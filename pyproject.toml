@@ -1,6 +1,6 @@
 [project]
 name = "projectmind-mcp"
-version = "0.9.1"
+version = "0.10.0"
 description = "Give your AI coding assistant a brain: persistent memory, hybrid code search, AI-authored annotations, and an AST symbol graph — 100% local MCP server, no API keys."
 authors = [
     {name = "Mykola Riabokon"}

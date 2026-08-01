@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.10.0] - 2026-08-01 🧭 ONE FILE-SELECTION PATH (symbol graph unbroken)
+
+### Fixed — the symbol graph indexed build output instead of your code
+
+The symbol graph never loaded `.indexignore`. It filtered on directory *names*
+only (`is_dir_ignored(d)`), and `.next` is not in `DEFAULT_IGNORED_DIRS`, so on
+any Next.js project it walked straight into `app/.next`.
+
+Measured on a real 896-file TypeScript repo: **6409 of 7354** parseable files
+lived under `app/.next`, they came **first** in walk order (the first `app/src`
+file sat at position 6456), and the build budget defaulted to
+`get_tool_budget_seconds()` = **20 s** while the directory walk alone took 11 s.
+The build always returned early holding only minified-bundle symbols, and
+`find_symbol` answered `No symbols matching` — which reads as "this symbol does
+not exist", not "the graph is broken".
+
+- **`file_scanner.py` — the single file-selection path.** Loads `.indexignore`,
+  matches on the project-relative POSIX path (so `/`-patterns work on Windows),
+  supports globs (`*.min.js`), and **prunes** ignored directories instead of
+  descending into them. The vector indexer, background indexer, symbol graph and
+  manifest all select files through it — the root cause was four walkers with
+  four filters, only two of which honoured `.indexignore`.
+- Symbol graph records **why** a build stopped early (`truncated` in
+  `symbol_graph.json`); `find_symbol` and `health` report a partial graph
+  instead of an empty answer.
+- Build budget is separate from the per-tool budget:
+  `PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS` (default **300 s**, was 20 s).
+- Arrow functions are named from their **binding site**. `.then(r => r.json())`
+  was registered as a symbol named `r` — the name came from the node's children,
+  i.e. its own parameter — filling the graph with junk names (`e`, `d`, `k`) and
+  mis-wiring call edges. Bound multi-parameter arrows (`const f = (a, b) => …`)
+  were skipped entirely and are now captured.
+
+### Fixed — searches that hung instead of failing
+
+- Minified files are skipped when parsing (symbol graph *and* AST splitter): one
+  megabyte-long line can hold the process-wide tree-sitter lock for minutes,
+  which is how a `search_codebase` call hung until the MCP timeout.
+- Read paths no longer block behind a running graph build — they serve the
+  previous graph or raise `SymbolGraphBusy` with a retry hint.
+
+### Fixed — index hygiene and job state
+
+- Deleted files are pruned from **both** stores. Dropping only the vector chunks
+  left the file in the BM25 corpus, still answering keyword queries (a deleted
+  `ROADMAP.md` kept coming back until `prune_index` was run by hand).
+  `index_all` and the "no changed files" path reconcile deletions too.
+- `index_codebase(force=True)` **preempts** a running job instead of being
+  refused by one wedged in its final phase; the refusal message now names the
+  current phase rather than showing a misleading `1078/1078 (100%)`.
+- Symbol-graph failures are surfaced as job warnings in `get_index_progress()`
+  and `health()` instead of a swallowed `logger.warning` — an empty graph counts
+  as a problem. This is why the breakage stayed invisible for so long.
+- `get_progress()` ignores the in-memory mirror when it belongs to another
+  project root: after `set_project_root()`, a fresh project reported the
+  *previous* project's stale (and failed) run as its own.
+- The manifest counts with the same rules — a project reporting **12602**
+  indexable files while indexing 1078 was counting build output.
+
+### Changed
+
+- `.indexignore` semantics now apply to the symbol graph and manifest, not just
+  the vector index. Existing ignore files start working harder; expect symbol
+  graph and manifest counts to drop on projects with build output.
+- `symbol_graph.json` gains a `truncated` field (older files still load).
+
+### Verified
+
+On a 896-file Next.js/TypeScript project: graph builds in **7.5 s** with 2479
+symbols from 943 files, complete; the three previously-unfindable exported
+functions resolve to `app/src/...` with line numbers; no minified single-char
+names remain; manifest reports 1079 indexable files instead of 12602.
+
+---
+
 ## [0.9.1] - 2026-07-05 🔎 CONTEXT BRIEF (scout pyramid, layer 0)
 
 ### Added
