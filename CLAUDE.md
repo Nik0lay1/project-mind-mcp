@@ -66,6 +66,7 @@ Duplicate entries under the same section are skipped automatically.
 |---|---|
 | `mcp_server.py` | All MCP tool definitions (~2500 lines) |
 | `vector_store_manager.py` | ChromaDB wrapper + query cache |
+| `file_scanner.py` | **Single** file-selection path (`.indexignore` + dir pruning) shared by the vector indexer, symbol graph and manifest |
 | `codebase_indexer.py` | File scanning + AST-aware chunking |
 | `ast_splitter.py` | tree-sitter parser (Python, JS, TS, TSX, Java, Go, Rust, Ruby) |
 | `bm25_index.py` | BM25 keyword index + Reciprocal Rank Fusion |
@@ -86,7 +87,15 @@ Duplicate entries under the same section are skipped automatically.
 - **BM25 index**: persisted at `.ai/bm25_index.json` (JSON, never pickle — the file lives in the target project), rebuilt automatically after every indexing run
 - **Vector store**: ChromaDB persistent at `.ai/vector_store/`
 - **Memory file**: `.ai/memory.md`
-- **Index ignore**: `.indexignore` in project root (fallback: `.ai/.indexignore`)
+- **Index ignore**: `.indexignore` in project root (fallback: `.ai/.indexignore`).
+  Substring match on the project-relative path, plus globs (`*.min.js`).
+  Applied by `file_scanner` to **every** consumer — vector index, symbol graph
+  and manifest — and matching directories are pruned, never descended into.
+  Add generated output (`.next`, `dist`) here: without it the symbol graph
+  spends its budget parsing minified bundles instead of your source.
+- **Symbol graph budget**: `PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS` (default
+  300 s) and `PROJECTMIND_SYMBOL_GRAPH_MAX_FILES` (default 8000). A build that
+  hits either limit is reported as partial by `find_symbol` and `health`.
 
 ## Commands
 

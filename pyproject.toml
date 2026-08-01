@@ -77,6 +77,7 @@ py-modules = [
     "background_indexer",
     "bm25_index",
     "config",
+    "file_scanner",
     "logger",
     "cache_manager",
     "maintenance",

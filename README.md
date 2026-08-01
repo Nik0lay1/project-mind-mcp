@@ -85,6 +85,8 @@ tree-sitter parses every source file into a graph of *symbols*, not files. Symbo
 - Relations: `callers`, `callees`, `implementors`, `subclasses`, `bases`, `usages`, `info`
 - Inheritance extraction works across **Python, JS, TS, Java, Ruby**; builtin-call noise (`print`, `len`, `push`…) is filtered out
 - The graph is rebuilt automatically by the background indexer and persisted to `.ai/symbol_graph.json`
+- File selection is shared with the indexer, so `.indexignore` keeps generated output (`.next`, `dist`) out of the graph — see [Ignore patterns](#ignore-patterns)
+- A build that runs out of files or time is reported as **partial** by `find_symbol` and `health`, never as "no symbols found"
 
 ### 🔍 Semantic Code Search
 Search your codebase by *meaning*, not just text. Powered by a local `sentence-transformers` model — no OpenAI key needed.
@@ -298,11 +300,30 @@ PROJECTMIND_MAX_FILE_SIZE_MB=5
 PROJECTMIND_MAX_MEMORY_MB=200
 PROJECTMIND_IMPORT_GRAPH_MAX_FILES=20000
 PROJECTMIND_SYMBOL_GRAPH_MAX_FILES=8000
+PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS=300
 PROJECTMIND_TOOL_BUDGET_SECONDS=45
 PROJECTMIND_MODEL_IDLE_UNLOAD_SECONDS=3600
 ```
 
-Custom ignore patterns: create `.indexignore` in the project root (fallback: `.ai/.indexignore`), same substring syntax as shown in the generated default.
+### Ignore patterns
+
+Create `.indexignore` in the project root (fallback: `.ai/.indexignore`), same
+substring syntax as shown in the generated default, plus globs like `*.min.js`.
+Patterns match the project-relative path, and a matching **directory is pruned**
+— never descended into.
+
+One file drives every consumer: the vector index, the BM25 corpus, the symbol
+graph and the manifest all select files through `file_scanner.py`. Excluding
+build output matters for more than disk space — on a Next.js repo, `app/.next`
+held 6 409 of 7 354 parseable files and sorted *first*, so a symbol graph that
+ignored it burned its whole budget on minified bundles:
+
+```
+node_modules
+.next
+dist
+*.min.js
+```
 
 ---
 
@@ -318,6 +339,7 @@ maintenance.py          ← self-healing background daemon
 background_indexer.py   ← non-blocking indexing with live progress
 vector_store_manager.py ← ChromaDB wrapper + hybrid search (L2)
 bm25_index.py           ← BM25 keyword index + RRF fusion (L1, JSON persistence)
+file_scanner.py         ← single file-selection path (.indexignore + dir pruning) shared by all consumers
 codebase_indexer.py     ← file scanning & AST-aware chunking
 ast_splitter.py         ← tree-sitter parser (9 languages, thread-safe)
 code_intelligence.py    ← import graph, complexity analysis, cached graphs

@@ -238,6 +238,28 @@ def _stop_background_indexing(timeout_seconds: float = 15.0) -> str | None:
         return None
 
 
+def _reset_indexing_state_for_new_root() -> None:
+    """
+    Forget the previous project's indexing job state.
+
+    The in-memory progress mirror is process-wide, so without this a freshly
+    selected project reported the *previous* project's run — including its
+    failures — as if it were its own.
+    """
+    try:
+        from background_indexer import BackgroundIndexer
+
+        BackgroundIndexer.reset_progress()
+    except Exception:
+        pass
+    try:
+        from symbol_graph import invalidate_symbol_graph_cache
+
+        invalidate_symbol_graph_cache()
+    except Exception:
+        pass
+
+
 @mcp.tool()
 def set_project_root(path: str) -> str:
     """
@@ -261,6 +283,7 @@ def set_project_root(path: str) -> str:
 
     reconfigure(target)
     reset_context()
+    _reset_indexing_state_for_new_root()
     _startup_done = False
     ensure_startup()
     log(f"Project root changed to: {config.PROJECT_ROOT}")
@@ -325,6 +348,33 @@ def _server_version() -> str:
             return "unknown"
 
 
+def _symbol_graph_status() -> str:
+    """One-line symbol-graph state for health output (never builds the graph)."""
+    try:
+        from symbol_graph import peek_symbol_graph
+
+        graph = peek_symbol_graph()
+    except Exception as exc:
+        return f"unavailable ({exc})"
+    if graph is None:
+        return "not built yet — run `index_codebase()`"
+    return graph.status_line()
+
+
+def _background_index_warnings() -> list[str]:
+    """Warnings recorded by the last background indexing run, if any."""
+    try:
+        from background_indexer import BackgroundIndexer
+
+        prog = BackgroundIndexer.get_progress()
+    except Exception:
+        return []
+    warnings = list(prog.get("warnings") or [])
+    if prog.get("status") == "error" and prog.get("last_error"):
+        warnings.insert(0, str(prog["last_error"]))
+    return warnings
+
+
 @mcp.tool()
 def health() -> str:
     """
@@ -353,7 +403,12 @@ def health() -> str:
         f"- **Memory file**: {'found' if memory_exists else 'missing'} (`{config.MEMORY_FILE}`)",
         f"- **Vector index**: {('empty' if chunks == 0 else f'{chunks} chunks') if chunks is not None else 'not initialized'}",
         f"- **Index ignore file**: `{resolve_index_ignore_file()}`",
+        f"- **Symbol graph**: {_symbol_graph_status()}",
     ]
+    bg_warnings = _background_index_warnings()
+    if bg_warnings:
+        parts.append("\n⚠️ **Last indexing run reported problems:**")
+        parts.extend(f"- {w}" for w in bg_warnings)
     if own_dir:
         parts.append(
             "\n⚠️ The project root points at the MCP server's own directory. "
@@ -405,6 +460,7 @@ def session_init(project_path: str = "") -> str:
                 sections.append(cancel_note)
         reconfigure(target)
         reset_context()
+        _reset_indexing_state_for_new_root()
         _startup_done = False
         ensure_startup()
         sections.append(f"**Project root** set to: `{config.PROJECT_ROOT}`")
@@ -1814,11 +1870,36 @@ def find_symbol(name: str, n_results: int = 8) -> str:
     if not name.strip():
         return "Error: name cannot be empty"
     try:
-        from symbol_graph import query_symbol_graph
+        from symbol_graph import SymbolGraphBusy, query_symbol_graph
 
-        hits = query_symbol_graph(name.strip(), n_results=n_results)
+        try:
+            hits = query_symbol_graph(name.strip(), n_results=n_results)
+        except SymbolGraphBusy as busy:
+            return f"⏳ {busy}"
         if not hits:
-            return f"No symbols matching '{name}' found. If the project was never indexed, run `index_codebase()` first."
+            from symbol_graph import peek_symbol_graph
+
+            graph = peek_symbol_graph()
+            if graph is None:
+                return (
+                    f"No symbols matching '{name}': the symbol graph has not been "
+                    "built yet. Run `index_codebase()` first."
+                )
+            if graph.truncated:
+                # A partial graph must not masquerade as "this symbol does not
+                # exist" — that is exactly how a broken build stayed invisible.
+                return (
+                    f"⚠️ No symbols matching '{name}', but the symbol graph is "
+                    f"INCOMPLETE: {graph.truncated}\n"
+                    f"Coverage so far: {graph.status_line()}\n"
+                    "The symbol may exist in the unparsed part of the tree. "
+                    "Exclude generated directories in `.indexignore`, then re-run "
+                    "`index_codebase(force=True)`."
+                )
+            return (
+                f"No symbols matching '{name}' found. "
+                f"Symbol graph: {graph.status_line()}."
+            )
         lines = [f"# SYMBOLS: {name}\n"]
         for h in hits:
             extra = h.get("extra", {})
@@ -2324,16 +2405,22 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
     if background:
         from background_indexer import BackgroundIndexer
 
-        if BackgroundIndexer.is_running():
+        # An explicit force=True is a request to rebuild *now*: it preempts a
+        # running job instead of being refused by one (a job wedged in its
+        # final phase used to make force permanently unreachable).
+        if BackgroundIndexer.is_running() and not force:
             prog = BackgroundIndexer.get_progress()
             done = prog.get("files_done", 0)
             total = prog.get("files_total", 0)
             pct = int(done / total * 100) if total else 0
+            phase = prog.get("phase") or prog.get("status") or "?"
             return (
                 f"{warn_own_dir}"
-                f"⏳ Background indexing already in progress: {done}/{total} files ({pct}%).\n"
-                "Call `get_index_progress()` to monitor, or use `index_codebase(background=False)` "
-                "to wait for completion."
+                f"⏳ Background indexing already in progress: {done}/{total} files ({pct}%), "
+                f"phase `{phase}`.\n"
+                "Call `get_index_progress()` to monitor, `index_codebase(force=True)` to "
+                "cancel it and start a fresh full rebuild, or "
+                "`index_codebase(background=False)` to wait for completion."
             )
 
         # Collect instant project structure before starting the heavy work
@@ -2358,8 +2445,16 @@ def index_codebase(force: bool = False, background: bool = True) -> str:
         except Exception as _e:
             structure_lines.append(f"_Structure overview unavailable: {_e}_")
 
-        started = BackgroundIndexer.start(force=force)
-        status = "started" if started else "already running"
+        preempted = force and BackgroundIndexer.is_running()
+        started = BackgroundIndexer.start(force=force, preempt=force)
+        if started:
+            status = "restarted (previous job cancelled)" if preempted else "started"
+        else:
+            status = (
+                "NOT started — the running job did not stop in time; retry in a moment"
+                if preempted
+                else "already running"
+            )
         structure_lines.append(
             f"\n---\n⏳ **Background indexing {status}.**\n"
             "Call `get_index_progress()` to check status and watch files being indexed.\n"

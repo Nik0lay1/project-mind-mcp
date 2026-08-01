@@ -1,7 +1,7 @@
-import os
 from collections.abc import Callable
 from pathlib import Path
 
+import config
 from ast_splitter import ASTSplitter
 from config import (
     BATCH_SIZE,
@@ -9,9 +9,9 @@ from config import (
     INDEXABLE_EXTENSIONS,
     get_max_file_size_bytes,
     get_max_memory_bytes,
-    is_dir_ignored,
     safe_read_text,
 )
+from file_scanner import IgnoreMatcher, ScanResult, scan_files
 from incremental_indexing import IndexMetadata
 from logger import get_logger
 from memory_limited_indexer import MemoryLimitedIndexer
@@ -93,10 +93,10 @@ class CodebaseIndexer:
         if file_path.suffix and file_path.suffix not in INDEXABLE_EXTENSIONS:
             return False
 
-        file_str = str(file_path)
-        for pattern in ignore_patterns:
-            if pattern in file_str:
-                return False
+        # Same matcher the shared scanner uses, so a file rejected here is
+        # exactly a file the scan would not have collected.
+        if IgnoreMatcher(config.PROJECT_ROOT, ignore_patterns).matches(file_path):
+            return False
 
         try:
             file_size = file_path.stat().st_size
@@ -107,6 +107,30 @@ class CodebaseIndexer:
             return False
 
         return True
+
+    def scan_files(
+        self,
+        root_dir: Path,
+        ignored_dirs: set[str],
+        ignore_patterns: set[str],
+        max_files: int = 20000,
+    ) -> ScanResult:
+        """
+        Scans the tree via the shared scanner, keeping truncation information.
+
+        Prefer this over :meth:`scan_indexable_files` when the caller needs to
+        know whether the whole tree was seen (e.g. before pruning "deleted"
+        files, which a partial scan would get wrong).
+        """
+        result = scan_files(
+            root_dir,
+            ignore_patterns=ignore_patterns,
+            ignored_dirs=ignored_dirs,
+            max_files=max_files,
+        )
+        if result.truncated:
+            logger.warning(f"Scan incomplete: {result.truncated}")
+        return result
 
     def scan_indexable_files(
         self,
@@ -127,24 +151,7 @@ class CodebaseIndexer:
         Returns:
             List of indexable file paths
         """
-        indexable_files = []
-
-        for root, dirs, files in os.walk(root_dir):
-            if len(indexable_files) >= max_files:
-                logger.warning(f"Scan limit reached ({max_files} files). Stopping scan.")
-                break
-
-            dirs[:] = [d for d in dirs if d not in ignored_dirs and not is_dir_ignored(d)]
-
-            for file in files:
-                if len(indexable_files) >= max_files:
-                    break
-
-                file_path = Path(root) / file
-                if self.should_index_file(file_path, ignore_patterns):
-                    indexable_files.append(file_path)
-
-        return indexable_files
+        return self.scan_files(root_dir, ignored_dirs, ignore_patterns, max_files).files
 
     def process_file_to_chunks(
         self,
@@ -240,6 +247,28 @@ class CodebaseIndexer:
         metadata.update_file(str(file_path), mtime)
         return True
 
+    def _prune_deleted(self, metadata: IndexMetadata, existing: list[Path]) -> int:
+        """
+        Remove index entries for files that no longer exist on disk.
+
+        Both stores must be cleared: dropping only the vector chunks leaves the
+        file in the BM25 corpus, where it keeps matching keyword queries.
+
+        Args:
+            metadata: Index metadata to reconcile.
+            existing: Every file the (complete) scan found.
+
+        Returns:
+            Number of deleted files removed from the index.
+        """
+        removed = metadata.remove_deleted_files({str(f) for f in existing})
+        for removed_path in removed:
+            self.vector_store.delete_by_source(removed_path)
+            self.vector_store.remove_bm25_source(removed_path)
+        if removed:
+            logger.info(f"Removed chunks of {len(removed)} deleted files from the index")
+        return len(removed)
+
     def index_all(
         self,
         root_dir: Path,
@@ -279,7 +308,8 @@ class CodebaseIndexer:
 
         logger.info(f"Scanning files (memory limit: {max_memory / 1024 / 1024:.0f} MB)...")
 
-        indexable_files = self.scan_indexable_files(root_dir, ignored_dirs, ignore_patterns)
+        scan = self.scan_files(root_dir, ignored_dirs, ignore_patterns)
+        indexable_files = scan.files
 
         # Apply limit to prevent extremely long operations
         total_files = len(indexable_files)
@@ -328,6 +358,14 @@ class CodebaseIndexer:
                 "re-indexed on the next run. Check the log for details."
             )
 
+        # Drop files that disappeared since the last run, so deleted sources
+        # stop showing up in search results. Only safe when the scan saw the
+        # whole tree and the file list was not capped — otherwise live files
+        # beyond the cap would be misread as deleted.
+        removed_count = 0
+        if not force and scan.complete and total_files <= MAX_FILES_PER_INDEX:
+            removed_count = self._prune_deleted(metadata, indexable_files)
+
         metadata.save()
 
         logger.info("Rebuilding BM25 index...")
@@ -337,6 +375,8 @@ class CodebaseIndexer:
         warning = (
             "" if total_files <= MAX_FILES_PER_INDEX else f" (limited from {total_files} files)"
         )
+        if removed_count:
+            warning += f", removed {removed_count} deleted files"
         return f"Indexed {file_count} files ({stats['total_chunks']} chunks in {stats['total_batches']} batches){warning}."
 
     def index_changed(
@@ -362,13 +402,20 @@ class CodebaseIndexer:
         metadata = IndexMetadata()
 
         scan_cap = 20000
-        all_files = self.scan_indexable_files(
-            root_dir, ignored_dirs, ignore_patterns, max_files=scan_cap
-        )
-        scan_truncated = len(all_files) >= scan_cap
+        scan = self.scan_files(root_dir, ignored_dirs, ignore_patterns, max_files=scan_cap)
+        all_files = scan.files
+        scan_truncated = not scan.complete
         changed_files = metadata.get_changed_files(all_files)
 
         if not changed_files:
+            # Nothing was edited, but files may still have been *deleted* —
+            # reconcile before returning, otherwise a removed file keeps
+            # answering searches until someone runs prune_index by hand.
+            removed = 0 if scan_truncated else self._prune_deleted(metadata, all_files)
+            if removed:
+                metadata.save()
+                self.vector_store.finalize_bm25(incremental_ok=True)
+                return f"No changed files to index. Removed {removed} deleted files from the index."
             return "No changed files to index."
 
         max_memory = get_max_memory_bytes()
@@ -421,13 +468,7 @@ class CodebaseIndexer:
         # Only prune "deleted" files when the scan saw the whole tree — a
         # truncated scan would misclassify live files beyond the cap as deleted.
         if not scan_truncated:
-            existing_files = {str(f) for f in all_files}
-            removed = metadata.remove_deleted_files(existing_files)
-            for removed_path in removed:
-                self.vector_store.delete_by_source(removed_path)
-                self.vector_store.remove_bm25_source(removed_path)
-            if removed:
-                logger.info(f"Removed chunks of {len(removed)} deleted files from the index")
+            self._prune_deleted(metadata, all_files)
         else:
             logger.warning(f"File scan hit the {scan_cap}-file cap; skipping deleted-file pruning")
 

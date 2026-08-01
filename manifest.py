@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from file_scanner import IgnoreMatcher, load_ignore_patterns
 from logger import get_logger
 
 logger = get_logger()
@@ -244,14 +245,22 @@ def build_manifest(
     by_extension: dict[str, int] = {}
     hot_files: list[tuple[str, int]] = []  # (path, size) for hot_paths
 
+    # Same ignore rules as the indexer: reporting "12 600 indexable files" for a
+    # project where 1 078 get indexed (the rest being build output) is alarming
+    # and wrong.
+    matcher = IgnoreMatcher(root, load_ignore_patterns(root))
+
     for cur_dir, dir_names, files in os.walk(root):
-        dir_names[:] = [d for d in dir_names if not config.is_dir_ignored(d)]
+        cur_path = Path(cur_dir)
+        dir_names[:] = [d for d in dir_names if not matcher.dir_ignored(cur_path / d, d)]
 
         for fname in files:
             if total_files >= max_files:
                 break
+            full = cur_path / fname
+            if matcher.matches(full):
+                continue
             total_files += 1
-            full = Path(cur_dir) / fname
             try:
                 stat = full.stat()
             except OSError:
@@ -380,14 +389,19 @@ def is_manifest_stale(manifest: Manifest, root: Path | None = None) -> bool:
     fresh_count = 0
     found_change = False
 
+    matcher = IgnoreMatcher(root, load_ignore_patterns(root))
+
     for cur_dir, dir_names, files in os.walk(root):
-        dir_names[:] = [d for d in dir_names if not config.is_dir_ignored(d)]
+        cur_path = Path(cur_dir)
+        dir_names[:] = [d for d in dir_names if not matcher.dir_ignored(cur_path / d, d)]
         for fname in files:
-            full = Path(cur_dir) / fname
+            full = cur_path / fname
             suffix = full.suffix.lower()
             if suffix in binary:
                 continue
             if suffix and suffix not in indexable:
+                continue
+            if matcher.matches(full):
                 continue
             fresh_count += 1
             try:

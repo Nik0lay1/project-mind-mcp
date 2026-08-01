@@ -31,7 +31,8 @@ from typing import Any
 
 import config
 from ast_splitter import _parse_lock
-from config import get_tool_budget_seconds, safe_read_text
+from config import safe_read_text
+from file_scanner import looks_minified, scan_files
 from incremental_indexing import atomic_write
 from logger import get_logger
 
@@ -40,6 +41,23 @@ logger = get_logger()
 # Guards the module-level graph cache (get_or_build / invalidate) so two
 # threads don't build the graph twice or observe a half-swapped cache.
 _graph_lock = threading.Lock()
+
+# Set while a build holds _graph_lock. Read paths must never block behind a
+# build: a single pathological file can keep the parser busy for minutes, and
+# search requests queued behind it looked like the server had hung.
+_build_in_progress = threading.Event()
+
+# How long a read-only caller waits for the lock before giving up.
+_READ_LOCK_TIMEOUT = 2.0
+
+
+class SymbolGraphBusy(RuntimeError):
+    """Raised when the graph is mid-rebuild and the caller must not block."""
+
+
+def build_in_progress() -> bool:
+    """True while a symbol graph build is running in some thread."""
+    return _build_in_progress.is_set()
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -109,6 +127,10 @@ class SymbolGraph:
     _subclasses_of: dict[str, set[str]] = field(default_factory=dict)  # name → qids
     _built_at: float = 0.0
     _file_count: int = 0
+    #: None when the whole tree was parsed; otherwise why the build stopped
+    #: early. A partial graph must say so — silently returning "no symbols
+    #: match" made a broken build look like an empty project.
+    _truncated: str | None = None
 
     def reverse_indexes(self) -> None:
         """Build derived indexes (by_name, callers_of, implementors_of, subclasses_of)."""
@@ -166,6 +188,7 @@ class SymbolGraph:
             "implements": {k: sorted(v) for k, v in self.implements.items()},
             "built_at": self._built_at,
             "file_count": self._file_count,
+            "truncated": self._truncated,
         }
 
     @classmethod
@@ -188,6 +211,7 @@ class SymbolGraph:
         g.implements = {k: set(v) for k, v in data.get("implements", {}).items()}
         g._built_at = data.get("built_at", 0.0)
         g._file_count = data.get("file_count", 0)
+        g._truncated = data.get("truncated")
         g.reverse_indexes()
         return g
 
@@ -206,6 +230,22 @@ class SymbolGraph:
     @property
     def implement_count(self) -> int:
         return sum(len(v) for v in self.implements.values())
+
+    @property
+    def truncated(self) -> str | None:
+        """Why the build stopped early, or None if the graph is complete."""
+        return self._truncated
+
+    @property
+    def file_count(self) -> int:
+        return self._file_count
+
+    def status_line(self) -> str:
+        """One-line health summary, safe to show in tool output."""
+        base = f"{self.symbol_count} symbols from {self._file_count} files"
+        if self._truncated:
+            return f"⚠️ PARTIAL graph — {base}. {self._truncated}"
+        return f"{base} (complete)"
 
 
 # ---------------------------------------------------------------------------
@@ -359,8 +399,60 @@ def _get_parser(language: str) -> Any | None:
 # ---------------------------------------------------------------------------
 
 
+# Wrappers that sit between an arrow function and whatever binds it:
+# `const f = (() => {}) as Handler`
+_ARROW_WRAPPER_TYPES = {
+    "parenthesized_expression",
+    "as_expression",
+    "satisfies_expression",
+    "non_null_expression",
+    "type_assertion",
+}
+
+
+def _arrow_function_name(node: Any) -> str:
+    """
+    Name of an arrow function, taken from whatever binds it.
+
+    An arrow's *children* are its parameters, so the generic
+    child-identifier lookup named `.then(r => r.json())` "r" — filling the
+    graph with junk symbols called `r`, `d`, `e` and wiring call edges to
+    them. An arrow with no binding site is anonymous: return "" so the
+    caller skips it (and still walks its body for calls).
+    """
+    child = node
+    parent = node.parent
+    while parent is not None and parent.type in _ARROW_WRAPPER_TYPES:
+        child, parent = parent, parent.parent
+    if parent is None:
+        return ""
+
+    if parent.type in ("variable_declarator", "public_field_definition", "field_definition"):
+        target = parent.child_by_field_name("name")
+    elif parent.type == "assignment_expression":
+        target = parent.child_by_field_name("left")
+    elif parent.type == "pair":
+        target = parent.child_by_field_name("key")
+    else:
+        return ""
+
+    if target is None or target is child:
+        return ""
+    if target.type in ("identifier", "property_identifier", "shorthand_property_identifier"):
+        return target.text.decode("utf-8", errors="replace")
+    if target.type == "member_expression":
+        prop = target.child_by_field_name("property")
+        if prop is not None:
+            return prop.text.decode("utf-8", errors="replace")
+    if target.type in ("string", "string_fragment"):
+        return target.text.decode("utf-8", errors="replace").strip("'\"`")
+    return ""
+
+
 def _get_node_name(node: Any, source: bytes) -> str:
     """Extract the name of a node (function name, class name, etc.)."""
+    if node.type == "arrow_function":
+        return _arrow_function_name(node)
     for child in node.children:
         if child.type in ("identifier", "name", "property_identifier"):
             return child.text.decode("utf-8", errors="replace")
@@ -810,116 +902,116 @@ def build_symbol_graph(
     if max_files is None:
         max_files = _get_max_files()
     if budget_seconds is None:
-        budget_seconds = get_tool_budget_seconds()
+        budget_seconds = get_build_budget_seconds()
 
     graph = SymbolGraph()
     t_start = _time_module.monotonic()
     file_count = 0
     skipped_no_parser = 0
+    skipped_minified = 0
 
-    try:
-        from config import (
-            BINARY_EXTENSIONS,
-            INDEXABLE_EXTENSIONS,
-            get_ignored_dirs,
-            get_max_file_size_bytes,
-            is_dir_ignored,
-        )
-    except ImportError:
-        logger.error("Cannot import config; build_symbol_graph aborted")
-        return graph
+    # The scanner is shared with the vector indexer on purpose: when these two
+    # had their own file-selection logic they drifted, and the symbol graph
+    # walked straight into build output (`app/.next`) that `.indexignore`
+    # excluded for everyone else.
+    scan = scan_files(
+        root_dir,
+        extensions=set(LANGUAGE_MAP),
+        max_files=max_files,
+        budget_seconds=budget_seconds,
+        allow_no_suffix=False,
+    )
+    if scan.truncated:
+        graph._truncated = f"file scan incomplete — {scan.truncated}"
+        logger.warning(f"Symbol graph: {graph._truncated}")
 
-    ignored_dirs = get_ignored_dirs()
-    max_size = get_max_file_size_bytes()
+    for fp in scan.files:
+        if file_count >= max_files:
+            graph._truncated = (
+                f"parsed only {file_count} of {len(scan.files)} files "
+                f"(max_files={max_files}); raise PROJECTMIND_SYMBOL_GRAPH_MAX_FILES"
+            )
+            logger.warning(f"Symbol graph: {graph._truncated}")
+            break
 
-    for dirpath, dirnames, filenames in os.walk(root_dir):
-        # Filter ignored dirs
-        dirnames[:] = [d for d in dirnames if d not in ignored_dirs and not is_dir_ignored(d)]
+        elapsed = _time_module.monotonic() - t_start
+        if elapsed > budget_seconds:
+            graph._truncated = (
+                f"parsed only {file_count} of {len(scan.files)} files — time budget "
+                f"of {budget_seconds:.0f}s exhausted; raise "
+                "PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS"
+            )
+            logger.warning(f"Symbol graph: {graph._truncated}")
+            break
 
-        for fname in filenames:
-            if file_count >= max_files:
-                logger.info(f"Symbol graph: hit max_files={max_files}, stopping scan")
-                graph._file_count = file_count
-                _finalize_graph(graph)
-                return graph
+        suffix = fp.suffix.lower()
+        language = LANGUAGE_MAP.get(suffix)
+        if language is None:
+            continue
 
-            elapsed = _time_module.monotonic() - t_start
-            if elapsed > budget_seconds:
-                logger.info(
-                    f"Symbol graph: budget {budget_seconds:.0f}s exhausted "
-                    f"after {file_count} files"
-                )
-                graph._file_count = file_count
-                _finalize_graph(graph)
-                return graph
+        parser = _get_parser(language)
+        if parser is None:
+            skipped_no_parser += 1
+            continue
 
-            fp = Path(dirpath) / fname
-            suffix = fp.suffix.lower()
-
-            if suffix in BINARY_EXTENSIONS or suffix not in INDEXABLE_EXTENSIONS:
+        # Read and parse
+        try:
+            content = safe_read_text(fp)
+            if not content.strip():
                 continue
-
-            try:
-                if fp.stat().st_size > max_size:
-                    continue
-            except OSError:
+            if looks_minified(content):
+                # One minified bundle can hold the global parse lock for
+                # minutes, stalling every concurrent search.
+                skipped_minified += 1
                 continue
+            source = content.encode("utf-8")
+        except Exception:
+            continue
 
-            language = LANGUAGE_MAP.get(suffix)
-            if language is None:
-                continue
+        try:
+            rel_path = fp.relative_to(root_dir).as_posix()
+        except ValueError:
+            rel_path = fp.as_posix()
 
-            parser = _get_parser(language)
-            if parser is None:
-                skipped_no_parser += 1
-                continue
+        try:
+            symbols, refs = _extract_symbols_from_file(fp, language, parser, source, rel_path)
+        except Exception as e:
+            logger.debug(f"Symbol graph: parse error in {fp}: {e}")
+            continue
 
-            # Read and parse
-            try:
-                content = safe_read_text(fp)
-                if not content.strip():
-                    continue
-                source = content.encode("utf-8")
-            except Exception:
-                continue
+        # Merge symbols
+        graph.symbols.update(symbols)
 
-            try:
-                rel_path = fp.relative_to(root_dir).as_posix()
-            except ValueError:
-                rel_path = fp.as_posix()
+        # Merge refs into graph
+        for ref in refs:
+            if ref.kind == "call":
+                graph.calls.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
+            elif ref.kind == "inherit":
+                graph.inherits.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
+            elif ref.kind == "implement":
+                graph.implements.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
 
-            try:
-                symbols, refs = _extract_symbols_from_file(fp, language, parser, source, rel_path)
-            except Exception as e:
-                logger.debug(f"Symbol graph: parse error in {fp}: {e}")
-                continue
+        file_count += 1
 
-            # Merge symbols
-            graph.symbols.update(symbols)
-
-            # Merge refs into graph
-            for ref in refs:
-                if ref.kind == "call":
-                    graph.calls.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
-                elif ref.kind == "inherit":
-                    graph.inherits.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
-                elif ref.kind == "implement":
-                    graph.implements.setdefault(ref.from_symbol, set()).add(ref.to_symbol)
-
-            file_count += 1
-
-            if file_count % 200 == 0:
-                logger.debug(
-                    f"Symbol graph: {file_count} files processed, "
-                    f"{len(graph.symbols)} symbols found"
-                )
+        if file_count % 200 == 0:
+            logger.debug(
+                f"Symbol graph: {file_count} files processed, "
+                f"{len(graph.symbols)} symbols found"
+            )
 
     graph._file_count = file_count
     if skipped_no_parser:
         logger.info(
-            f"Symbol graph: skipped {skipped_no_parser} files " f"(no tree-sitter parser available)"
+            f"Symbol graph: skipped {skipped_no_parser} files (no tree-sitter parser available)"
         )
+    if skipped_minified:
+        logger.info(f"Symbol graph: skipped {skipped_minified} minified/generated files")
     _finalize_graph(graph)
+    logger.info(
+        f"Symbol graph built: {len(graph.symbols)} symbols from {file_count} files "
+        f"in {_time_module.monotonic() - t_start:.1f}s"
+        + (f" — PARTIAL: {graph._truncated}" if graph._truncated else "")
+    )
     return graph
 
 
@@ -1044,6 +1136,26 @@ def _get_max_files() -> int:
     return 8000
 
 
+def get_build_budget_seconds() -> float:
+    """
+    Wall-clock budget for a full graph build.
+
+    Deliberately far larger than ``get_tool_budget_seconds()`` (20 s, sized for
+    a single tool call): the graph is normally built once in the background
+    indexer's thread, and a 20 s cap silently truncated real projects into a
+    graph that looked empty.
+    """
+    env_val = os.getenv("PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS")
+    if env_val:
+        try:
+            parsed = float(env_val)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    return 300.0
+
+
 def get_or_build_symbol_graph(force: bool = False) -> SymbolGraph:
     """
     Returns the current SymbolGraph, building it if necessary.
@@ -1057,35 +1169,39 @@ def get_or_build_symbol_graph(force: bool = False) -> SymbolGraph:
     global _cached_graph, _cache_path
 
     with _graph_lock:
-        graph_path = _graph_path()
+        _build_in_progress.set()
+        try:
+            graph_path = _graph_path()
 
-        # Invalidate cache if path changed (reconfigure called)
-        if _cache_path is not None and _cache_path != graph_path:
-            _cached_graph = None
-        _cache_path = graph_path
+            # Invalidate cache if path changed (reconfigure called)
+            if _cache_path is not None and _cache_path != graph_path:
+                _cached_graph = None
+            _cache_path = graph_path
 
-        if _cached_graph is not None and not force:
-            return _cached_graph
+            if _cached_graph is not None and not force:
+                return _cached_graph
 
-        # Try loading from disk first
-        if not force:
-            loaded = load_symbol_graph(graph_path)
-            if loaded is not None:
-                # Check if stale
-                if not is_symbol_graph_stale(loaded):
-                    _cached_graph = loaded
-                    return loaded
-                logger.info("Symbol graph is stale; rebuilding...")
+            # Try loading from disk first
+            if not force:
+                loaded = load_symbol_graph(graph_path)
+                if loaded is not None:
+                    # Check if stale
+                    if not is_symbol_graph_stale(loaded):
+                        _cached_graph = loaded
+                        return loaded
+                    logger.info("Symbol graph is stale; rebuilding...")
 
-        # Build from scratch
-        logger.info("Building symbol graph...")
-        graph = build_symbol_graph(config.PROJECT_ROOT)
+            # Build from scratch
+            logger.info("Building symbol graph...")
+            graph = build_symbol_graph(config.PROJECT_ROOT)
 
-        # Save for next time
-        save_symbol_graph(graph, graph_path)
+            # Save for next time
+            save_symbol_graph(graph, graph_path)
 
-        _cached_graph = graph
-        return graph
+            _cached_graph = graph
+            return graph
+        finally:
+            _build_in_progress.clear()
 
 
 def peek_symbol_graph() -> SymbolGraph | None:
@@ -1097,7 +1213,12 @@ def peek_symbol_graph() -> SymbolGraph | None:
     up-to-date graph is available yet.
     """
     global _cached_graph, _cache_path
-    with _graph_lock:
+    # Never block behind an in-flight build: waiting on the lock is what turned
+    # one slow parse into a search request that hung until the MCP timeout.
+    if not _graph_lock.acquire(timeout=_READ_LOCK_TIMEOUT):
+        logger.info("Symbol graph is locked by a running build; skipping symbol tier")
+        return None
+    try:
         graph_path = _graph_path()
         if _cache_path == graph_path and _cached_graph is not None:
             return _cached_graph
@@ -1106,6 +1227,8 @@ def peek_symbol_graph() -> SymbolGraph | None:
             _cached_graph = loaded
             _cache_path = graph_path
         return loaded
+    finally:
+        _graph_lock.release()
 
 
 def invalidate_symbol_graph_cache() -> None:
@@ -1122,7 +1245,21 @@ def invalidate_symbol_graph_cache() -> None:
 
 
 def _ensure_graph() -> SymbolGraph:
-    """Get the graph, building lazily if needed."""
+    """
+    Get the graph for a query, building lazily if needed.
+
+    While another thread is building, serve whatever is already on disk rather
+    than queueing behind the build — a query must fail fast or answer from the
+    previous graph, never hang.
+    """
+    if _build_in_progress.is_set():
+        cached = peek_symbol_graph()
+        if cached is not None:
+            return cached
+        raise SymbolGraphBusy(
+            "The symbol graph is being rebuilt right now and no previous graph is "
+            "available. Retry in a few seconds, or call `get_index_progress()`."
+        )
     return get_or_build_symbol_graph(force=False)
 
 

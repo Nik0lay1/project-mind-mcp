@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from file_scanner import ScanResult, load_ignore_patterns, scan_files
 from incremental_indexing import atomic_write
 from logger import get_logger
 
@@ -100,16 +101,30 @@ class BackgroundIndexer:
     # -----------------------------------------------------------------------
 
     @classmethod
-    def start(cls, force: bool = False) -> bool:
+    def start(cls, force: bool = False, preempt: bool = False, preempt_timeout: float = 15.0) -> bool:
         """
         Start background indexing unless one is already running.
 
         Args:
             force: If True, clears the existing index before indexing.
+            preempt: If True, cancel a job that is already running and take its
+                place. Without this an explicitly requested rebuild could be
+                refused indefinitely by a job stuck in its final phase.
+            preempt_timeout: How long to wait for the cancelled job to stop.
 
         Returns:
-            True if a new job was started, False if one was already running.
+            True if a new job was started, False if one was already running
+            (and could not be preempted).
         """
+        if preempt:
+            running = cls._preempt(preempt_timeout)
+            if running:
+                logger.warning(
+                    "BackgroundIndexer: running job did not stop within "
+                    f"{preempt_timeout:.0f}s; not starting a new one"
+                )
+                return False
+
         with cls._lock:
             if cls._thread is not None and cls._thread.is_alive():
                 logger.info("BackgroundIndexer: job already running, ignoring start()")
@@ -139,17 +154,53 @@ class BackgroundIndexer:
             return cls._thread is not None and cls._thread.is_alive()
 
     @classmethod
+    def _preempt(cls, timeout: float) -> bool:
+        """
+        Cancel the running job and wait for it to finish.
+
+        Returns:
+            True if a job is *still* running after the wait.
+        """
+        with cls._lock:
+            thread = cls._thread
+            if thread is None or not thread.is_alive():
+                return False
+        logger.info("BackgroundIndexer: preempting the running job")
+        cls._cancel_event.set()
+        thread.join(timeout=timeout)
+        return thread.is_alive()
+
+    @classmethod
     def get_progress(cls) -> dict[str, Any]:
         """
-        Returns the latest progress dict.
+        Returns the latest progress dict for the *current* project root.
 
         Prefers the in-memory mirror; falls back to disk read if the mirror
         is empty (e.g. called from a different process / after restart).
+
+        The mirror is only trusted when it belongs to the active root:
+        `set_project_root()` used to leave the previous project's run in the
+        mirror, so a fresh project reported someone else's stale (and failed)
+        indexing job.
         """
         with cls._progress_lock:
-            if cls._progress:
-                return dict(cls._progress)
-        return _read_progress() or {"status": "idle"}
+            mirror = dict(cls._progress) if cls._progress else None
+
+        if mirror is not None:
+            mirror_root = mirror.get("root_dir")
+            if mirror_root is None or Path(mirror_root) == config.PROJECT_ROOT:
+                return mirror
+
+        on_disk = _read_progress()
+        if on_disk:
+            return on_disk
+        return {"status": "idle"}
+
+    @classmethod
+    def reset_progress(cls) -> None:
+        """Drop the in-memory mirror (call when the project root changes)."""
+        with cls._progress_lock:
+            cls._progress = {}
 
     @classmethod
     def cancel(cls) -> bool:
@@ -179,6 +230,24 @@ class BackgroundIndexer:
         _write_progress(snapshot)
 
     @classmethod
+    def _add_warning(cls, message: str) -> None:
+        """
+        Record a non-fatal problem with the run.
+
+        Warnings survive into the persisted progress file so `health()` and
+        `get_index_progress()` can show that a "done" run was in fact degraded.
+        """
+        logger.warning(f"BackgroundIndexer: {message}")
+        with cls._progress_lock:
+            warnings = list(cls._progress.get("warnings") or [])
+            if message not in warnings:
+                warnings.append(message)
+            cls._progress["warnings"] = warnings
+            cls._progress["updated_at"] = datetime.now(timezone.utc).isoformat()
+            snapshot = dict(cls._progress)
+        _write_progress(snapshot)
+
+    @classmethod
     def _run(cls, root_dir: Path, ai_dir: Path, force: bool) -> None:
         """Main indexing routine executed in the background thread."""
         started_at = datetime.now(timezone.utc).isoformat()
@@ -195,6 +264,8 @@ class BackgroundIndexer:
                 "updated_at": started_at,
                 "eta_seconds": None,
                 "last_error": None,
+                "warnings": [],
+                "symbol_graph": None,
                 "root_dir": str(root_dir),
             }
             snapshot = dict(cls._progress)
@@ -232,8 +303,11 @@ class BackgroundIndexer:
 
         cls._update(status="scanning", phase="scan")
 
-        indexable_files = _scan_files(root_dir, ignored_dirs, ignore_patterns)
-        scan_truncated = len(indexable_files) >= _SCAN_MAX_FILES
+        scan = _scan_files(root_dir, ignored_dirs, ignore_patterns)
+        indexable_files = scan.files
+        scan_truncated = not scan.complete
+        if scan_truncated:
+            cls._add_warning(f"File scan incomplete: {scan.truncated}")
         if cls._cancel_event.is_set():
             cls._update(status="idle", last_error="Cancelled during scan")
             return
@@ -355,12 +429,12 @@ class BackgroundIndexer:
         # Only prune "deleted" files when the scan saw the whole tree — a
         # truncated scan would misclassify live files beyond the cap as deleted.
         if not scan_truncated:
-            existing_files = {str(f) for f in indexable_files}
-            removed = metadata.remove_deleted_files(existing_files)
-            for removed_path in removed:
-                ctx.vector_store.delete_by_source(removed_path)
+            # Shared with the foreground path so both stores (vector *and*
+            # BM25) forget the file — clearing only one left deleted files
+            # answering keyword searches.
+            removed = indexer._prune_deleted(metadata, indexable_files)
             if removed:
-                logger.info(f"BackgroundIndexer: removed chunks of {len(removed)} deleted files")
+                logger.info(f"BackgroundIndexer: removed chunks of {removed} deleted files")
         metadata.save()
 
         logger.info("BackgroundIndexer: rebuilding BM25 index...")
@@ -370,13 +444,31 @@ class BackgroundIndexer:
 
         # Refresh the symbol graph while we're already in a background thread,
         # so search-time callers get it for free via peek_symbol_graph().
+        if cls._cancel_event.is_set():
+            cls._update(status="idle", last_error="Cancelled before symbol graph rebuild")
+            return
+        cls._update(status="finalizing", phase="symbol_graph")
         try:
             from symbol_graph import get_or_build_symbol_graph
 
             logger.info("BackgroundIndexer: rebuilding symbol graph...")
-            get_or_build_symbol_graph(force=True)
+            graph = get_or_build_symbol_graph(force=True)
+            # A silent `except: log.warning` here is what kept a symbol graph
+            # built entirely from build output invisible: find_symbol just
+            # answered "no symbols" forever. Failures and partial builds are
+            # now part of the reported job state.
+            if graph.truncated:
+                cls._add_warning(f"Symbol graph is incomplete: {graph.truncated}")
+            elif graph.symbol_count == 0:
+                cls._add_warning(
+                    "Symbol graph built but contains no symbols — check that the "
+                    "project's source directories are not excluded by .indexignore."
+                )
+            cls._update(symbol_graph=graph.status_line())
         except Exception as e:
-            logger.warning(f"BackgroundIndexer: symbol graph rebuild failed: {e}")
+            logger.error(f"BackgroundIndexer: symbol graph rebuild failed: {e}", exc_info=True)
+            cls._add_warning(f"Symbol graph rebuild failed: {e}")
+            cls._update(symbol_graph=f"failed: {e}")
 
         stats = mem_indexer.get_stats()
         cls._update(
@@ -402,58 +494,19 @@ def _scan_files(
     root_dir: Path,
     ignored_dirs: set[str],
     ignore_patterns: set[str],
-) -> list[Path]:
-    """Thin wrapper around CodebaseIndexer.scan_indexable_files without
-    needing a full VectorStoreManager (avoids model load)."""
-    import os
-
-    from config import (
-        BINARY_EXTENSIONS,
-        INDEXABLE_EXTENSIONS,
-        get_max_file_size_bytes,
-        is_dir_ignored,
+) -> ScanResult:
+    """Scan without constructing a VectorStoreManager (avoids the model load)."""
+    return scan_files(
+        root_dir,
+        ignore_patterns=ignore_patterns,
+        ignored_dirs=ignored_dirs,
+        max_files=_SCAN_MAX_FILES,
     )
-
-    indexable_files: list[Path] = []
-    max_files = _SCAN_MAX_FILES
-
-    for root, dirs, files in os.walk(root_dir):
-        if len(indexable_files) >= max_files:
-            break
-        dirs[:] = [d for d in dirs if d not in ignored_dirs and not is_dir_ignored(d)]
-
-        for file in files:
-            if len(indexable_files) >= max_files:
-                break
-            fp = Path(root) / file
-
-            if fp.suffix in BINARY_EXTENSIONS:
-                continue
-            if fp.suffix and fp.suffix not in INDEXABLE_EXTENSIONS:
-                continue
-            fp_str = str(fp)
-            if any(pat in fp_str for pat in ignore_patterns):
-                continue
-            try:
-                if fp.stat().st_size > get_max_file_size_bytes():
-                    continue
-            except Exception:
-                continue
-            indexable_files.append(fp)
-
-    return indexable_files
 
 
 def _load_ignore_patterns(root_dir: Path) -> set[str]:
     """Reads .indexignore (root-level preferred, .ai/ fallback)."""
-    for candidate in [root_dir / ".indexignore", root_dir / ".ai" / ".indexignore"]:
-        if candidate.exists():
-            try:
-                lines = candidate.read_text(encoding="utf-8").splitlines()
-                return {ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")}
-            except Exception:
-                pass
-    return set()
+    return load_ignore_patterns(root_dir)
 
 
 def format_progress_markdown(data: dict[str, Any]) -> str:
@@ -508,13 +561,28 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
     if updated_at:
         lines.append(f"**Last update**: {updated_at}")
 
+    symbol_graph = data.get("symbol_graph")
+    if symbol_graph:
+        lines.append(f"**Symbol graph**: {symbol_graph}")
+
     if last_error:
         lines.append(f"\n⚠️ **Error**: {last_error}")
 
+    warnings = data.get("warnings") or []
+    if warnings:
+        lines.append("\n⚠️ **Warnings**:")
+        lines.extend(f"- {w}" for w in warnings)
+
     if status == "done":
-        lines.append(
-            "\n✅ Indexing complete! You can now use `search_codebase()` for semantic search."
-        )
+        if warnings:
+            lines.append(
+                "\n⚠️ Indexing finished, but with the warnings above — search results "
+                "may be incomplete."
+            )
+        else:
+            lines.append(
+                "\n✅ Indexing complete! You can now use `search_codebase()` for semantic search."
+            )
     elif status == "initializing_model":
         lines.append("\n_Loading SentenceTransformer model — this takes 30–60 s on first run._")
     elif status in ("scanning", "indexing", "finalizing"):

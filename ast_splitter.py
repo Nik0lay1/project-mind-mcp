@@ -7,6 +7,7 @@ from typing import Any
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import CHUNK_OVERLAP, CHUNK_SIZE
+from file_scanner import looks_minified
 from logger import get_logger
 
 logger = get_logger()
@@ -269,6 +270,12 @@ class ASTSplitter:
 
     def split(self, content: str, file_path: Path) -> list[dict[str, Any]]:
         language = LANGUAGE_MAP.get(file_path.suffix.lower())
+        # Minified bundles are parsed as one enormous line: tree-sitter can sit
+        # on it for minutes while holding the process-wide parse lock, stalling
+        # every concurrent search. Text-split them instead.
+        if language and looks_minified(content):
+            logger.info(f"Skipping AST split for minified/generated file: {file_path}")
+            language = None
         if language:
             parser = _get_parser(language)
             if parser:

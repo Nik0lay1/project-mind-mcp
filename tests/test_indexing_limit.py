@@ -1,37 +1,45 @@
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from codebase_indexer import CodebaseIndexer
+
+
+def _make_tree(root, dirs_and_counts):
+    for subdir, count in dirs_and_counts:
+        target = root / subdir if subdir else root
+        target.mkdir(parents=True, exist_ok=True)
+        for i in range(count):
+            (target / f"file{i}.py").write_text("x = 1\n", encoding="utf-8")
 
 
 class TestIndexingLimit:
     """Tests for indexing limits."""
 
-    @patch("os.walk")
-    def test_scan_limit(self, mock_walk):
-        """Test that scan_indexable_files respects the max_files limit."""
-        # Mock os.walk to return many files
-        # We simulate 2 directories, each with 10 files
-        mock_walk.return_value = [
-            ("/root", [], [f"file{i}.py" for i in range(10)]),
-            ("/root/subdir", [], [f"subfile{i}.py" for i in range(10)]),
-        ]
+    def test_scan_limit(self, tmp_path):
+        """scan_indexable_files stops at max_files."""
+        _make_tree(tmp_path, [("", 10), ("subdir", 10)])
 
-        # Mock vector store
-        mock_store = MagicMock()
-        indexer = CodebaseIndexer(mock_store)
-
-        # Mock should_index_file to always return True
-        indexer.should_index_file = MagicMock(return_value=True)
-
-        # Set a small limit
+        indexer = CodebaseIndexer(MagicMock())
         limit = 5
 
-        # Run scan with limit
         files = indexer.scan_indexable_files(
-            Path("/root"), ignored_dirs=set(), ignore_patterns=set(), max_files=limit
+            tmp_path, ignored_dirs=set(), ignore_patterns=set(), max_files=limit
         )
 
         assert len(files) == limit
-        assert len(files) < 20  # Should be less than total available files
-        print(f"Scanned {len(files)} files with limit {limit}")
+
+    def test_scan_reports_truncation(self, tmp_path):
+        """A capped scan says so, instead of looking like a complete result."""
+        _make_tree(tmp_path, [("", 10)])
+
+        indexer = CodebaseIndexer(MagicMock())
+
+        capped = indexer.scan_files(
+            tmp_path, ignored_dirs=set(), ignore_patterns=set(), max_files=4
+        )
+        assert not capped.complete
+        assert "file limit" in capped.truncated
+
+        full = indexer.scan_files(tmp_path, ignored_dirs=set(), ignore_patterns=set())
+        assert full.complete
+        assert full.truncated is None
+        assert len(full.files) == 10
