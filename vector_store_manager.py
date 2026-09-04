@@ -109,12 +109,36 @@ class VectorStoreManager:
 
                 class LocalSentenceTransformerEmbeddingFunction(embedding_functions.EmbeddingFunction):  # type: ignore[type-arg]
                     def __init__(self, model_name: str) -> None:
-                        logger.info(f"Loading SentenceTransformer model '{model_name}'...")
-                        self.model = SentenceTransformer(model_name)
-                        logger.info("Model loaded successfully")
+                        revision = config.get_model_revision()
+                        logger.info(
+                            f"Loading SentenceTransformer model '{model_name}' @ {revision[:12]}..."
+                        )
+                        # Try the local cache first. A plain load issues ~20 HTTP
+                        # round-trips to the Hub even when every file is already
+                        # cached, so a slow or offline network turned "load the
+                        # cached model" into a multi-minute stall.
+                        import torch
+
+                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        try:
+                            self.model = SentenceTransformer(
+                                model_name, revision=revision, device=device, local_files_only=True
+                            )
+                            logger.info(f"Model loaded from local cache (device: {device})")
+                        except Exception as cache_miss:
+                            logger.info(
+                                f"Model not in local cache ({cache_miss}); "
+                                "downloading from the Hub (one-off, ~330 MB)..."
+                            )
+                            self.model = SentenceTransformer(
+                                model_name, revision=revision, device=device
+                            )
+                            logger.info(
+                                f"Model downloaded and loaded successfully (device: {device})"
+                            )
 
                     def __call__(self, input: list[str]) -> list[list[float]]:  # type: ignore[override]
-                        return self.model.encode(input).tolist()  # type: ignore[return-value]
+                        return self.model.encode(input, show_progress_bar=False).tolist()  # type: ignore[return-value]
 
                 self.chroma_client = chromadb.PersistentClient(path=str(config.VECTOR_STORE_DIR))
                 logger.info("ChromaDB client initialized")

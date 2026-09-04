@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.11.0] - 2026-08-09 ⏱️ THE SERVER STOPS FREEZING
+
+### Fixed — the server stopped answering, permanently
+
+`session_init` returned "no response or progress for 1800s". It was not one
+bug; they compounded, and the one at the bottom was not a slow path — it was a
+thread that never came back.
+
+- **Loading numpy from a background thread wedged the process.** `import numpy`
+  (reached via chromadb, sentence_transformers and langchain_text_splitters)
+  loads `numpy._core._multiarray_umath`, a C extension that brings OpenBLAS with
+  it. On Windows that load, performed from a background thread of this server,
+  never returns — fourteen stack dumps over nine minutes showed the same frame:
+
+      warmup -> import symbol_graph -> ast_splitter -> langchain_text_splitters
+        -> numpy/_core/overrides.py:8  from numpy._core._multiarray_umath import
+        -> importlib._bootstrap_external:1293 create_module   [never returns]
+
+  The same import on the main thread takes ~10 s. Whichever thread first needed
+  embeddings did the import, so when that was the background indexer the vector
+  store was never created at all, and every later caller queued behind the dead
+  thread's module locks. New `warmup.py` does these imports **once, on the main
+  thread, from `main()` before the server starts serving**; every later caller
+  gets an immediate no-op. **Cold `search_codebase`: never → 2.0 s.**
+
+  The cost is paid at boot instead: measured boot-to-`initialize` is **27–35 s**,
+  ~16 s of which is `import sentence_transformers`, reached via
+  `ast_splitter` → `langchain_text_splitters`. That is close to a client's
+  default startup timeout; `MCP_TIMEOUT=60000` on the client side covers it.
+  `tests/test_stdio.py` now measures boot and fails past 120 s, so this cannot
+  creep up unnoticed.
+- **Tools ran on the event loop.** FastMCP calls a synchronous tool body inline
+  in the asyncio task that reads stdin
+  (`func_metadata.py`: `return fn(**args)`). All 56 tools here are `def`, so
+  while any one of them ran, the transport could not read the next request or
+  emit anything at all — the client saw silence, not a slow answer. Every sync
+  tool is now registered behind a coroutine that offloads to a worker thread.
+  Measured: 247 event-loop ticks during a session that previously produced 0.
+  `tests/test_event_loop_not_blocked.py` locks this in.
+- **`session_init` cost 37 s before doing any work.** `reset_context()` did
+  `from symbol_graph import …`, and that import pulls in tree-sitter and every
+  grammar: **18 s** on a cold process, paid on the *import line*, twice. There
+  is nothing to invalidate when the module was never loaded, so the cache is now
+  only touched when `symbol_graph` is already in `sys.modules`.
+  **37 s → 0.1 s.**
+- **The embedding model re-downloaded itself.** `SentenceTransformer` resolved
+  `main` on every load; when upstream moved the branch the Hub called it a new
+  revision, and with no symlink support on Windows that is a fresh **328 MB**
+  download into a second cache snapshot — mid-session, with no progress
+  anywhere. `MODEL_REVISION` now pins the commit (override with
+  `PROJECTMIND_MODEL_REVISION`), and the load tries `local_files_only=True`
+  first, falling back to the network only on a genuine cache miss. A cached
+  load also stopped issuing ~20 HTTP round-trips. **240 s → 1.6 s.**
+- **First-call latency landed on whichever tool you called first.** The model
+  preload was scheduled by `get_context()`, which nothing called until the first
+  search — so `search_codebase` paid ~45 s of `import torch`, and `find_symbol`
+  paid the 18 s tree-sitter import. Both are now paid at boot; `session_init`
+  additionally loads the on-disk symbol graph and the model for the project it
+  was just pointed at. **First search 45 s → 1.0 s.**
+- **The default `.indexignore` was written for the wrong project.**
+  `_ensure_default_indexignore()` ran only from `main()`, against the root
+  auto-detected at boot — so a project reached through `session_init` never got
+  defaults, and its generated trees were indexed as source. It now also runs
+  from `session_init` and `set_project_root` — wherever the user actually picks
+  a project. `.stryker-tmp` (Stryker's mutation-testing sandbox, a full copy of
+  the repo) joins the default list; it cost one real project 121 duplicate
+  files in the manifest, every source document indexed twice.
+- **The log stayed in the wrong project.** The logger singleton bound its file
+  handler at import time, so after `set_project_root` / `session_init` every
+  line about the real project was written into whichever `.ai/` the process
+  started in — usually the MCP server's own. A hung session left no trace where
+  anyone would look for it. `logger.rebind_log_file()` now runs on every
+  reconfigure.
+- **Import-graph budget check is `>=`, not `>`.** `time.monotonic()` has ~15.6 ms
+  granularity on Windows, so a zero budget measured 0.0 s elapsed and scanned a
+  small repo to the end — which made `test_budget_emits_warning` fail only
+  sometimes, in full runs, and never in isolation.
+- **`health` was the slowest tool in the server.** It imported `symbol_graph`
+  for a one-line status, and blocked on the module lock whenever the warm-up
+  thread was mid-import. It now reads the loaded module if there is one and the
+  file on disk otherwise. **18 s → 0.0 s.**
+
 ## [0.10.0] - 2026-08-01 🧭 ONE FILE-SELECTION PATH (symbol graph unbroken)
 
 ### Fixed — the symbol graph indexed build output instead of your code

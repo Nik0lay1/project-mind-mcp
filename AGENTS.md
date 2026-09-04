@@ -44,7 +44,7 @@ This single call:
 ```
 Memory__index_changed_files
 ```
-Fast — re-indexes only modified files.
+Fast and non-blocking — runs incremental indexing in the background. Call `Memory__get_index_progress()` if you need to monitor status.
 
 ### Save important decisions
 ```

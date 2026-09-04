@@ -150,6 +150,57 @@ class BackgroundIndexer:
             return True
 
     @classmethod
+    def start_incremental(
+        cls,
+        changed_files: list[Path] | None = None,
+        preempt: bool = False,
+        preempt_timeout: float = 15.0,
+    ) -> bool:
+        """
+        Start background incremental indexing unless one is already running.
+
+        Args:
+            changed_files: Optional pre-scanned list of changed files to index.
+                If None, detects changed files in the background.
+            preempt: If True, cancel a job that is already running and take its place.
+            preempt_timeout: How long to wait for the cancelled job to stop.
+
+        Returns:
+            True if a new job was started, False if one was already running.
+        """
+        if preempt:
+            running = cls._preempt(preempt_timeout)
+            if running:
+                logger.warning(
+                    "BackgroundIndexer: running job did not stop within "
+                    f"{preempt_timeout:.0f}s; not starting incremental job"
+                )
+                return False
+
+        with cls._lock:
+            if cls._thread is not None and cls._thread.is_alive():
+                logger.info("BackgroundIndexer: job already running, ignoring start_incremental()")
+                return False
+
+            cls._cancel_event.clear()
+
+            root_dir = config.PROJECT_ROOT
+            ai_dir = config.AI_DIR
+
+            cls._thread = threading.Thread(
+                target=cls._run,
+                args=(root_dir, ai_dir, False, True, changed_files),
+                name="bg-indexer-inc",
+                daemon=True,
+            )
+            cls._thread.start()
+            n_files = len(changed_files) if changed_files is not None else "auto"
+            logger.info(
+                f"BackgroundIndexer: incremental job started ({n_files} files, root={root_dir})"
+            )
+            return True
+
+    @classmethod
     def is_running(cls) -> bool:
         """Returns True if the background thread is alive."""
         with cls._lock:
@@ -195,6 +246,20 @@ class BackgroundIndexer:
 
         on_disk = _read_progress()
         if on_disk:
+            # Stale / crash recovery: if on_disk says a job is active, but no
+            # thread is running in this process, mark it as interrupted so the
+            # system does not show permanent 'finalizing' or 'indexing' state.
+            if not cls.is_running() and on_disk.get("status") in {
+                "scanning",
+                "initializing_model",
+                "indexing",
+                "finalizing",
+            }:
+                on_disk["status"] = "interrupted"
+                if not on_disk.get("last_error"):
+                    on_disk["last_error"] = (
+                        "Previous indexing job was interrupted (server restarted)"
+                    )
             return on_disk
         return {"status": "idle"}
 
@@ -250,7 +315,14 @@ class BackgroundIndexer:
         _write_progress(snapshot)
 
     @classmethod
-    def _run(cls, root_dir: Path, ai_dir: Path, force: bool) -> None:
+    def _run(
+        cls,
+        root_dir: Path,
+        ai_dir: Path,
+        force: bool,
+        incremental: bool = False,
+        changed_files: list[Path] | None = None,
+    ) -> None:
         """Main indexing routine executed in the background thread."""
         started_at = datetime.now(timezone.utc).isoformat()
 
@@ -258,8 +330,9 @@ class BackgroundIndexer:
             cls._progress = {
                 "status": "scanning",
                 "phase": "scan",
+                "mode": "incremental" if incremental else "full",
                 "force": force,
-                "files_total": 0,
+                "files_total": len(changed_files) if changed_files is not None else 0,
                 "files_done": 0,
                 "chunks_done": 0,
                 "started_at": started_at,
@@ -274,15 +347,203 @@ class BackgroundIndexer:
         _write_progress(snapshot)
 
         try:
-            cls._do_index(root_dir, force)
+            if incremental:
+                cls._do_index_incremental(root_dir, changed_files)
+            else:
+                cls._do_index(root_dir, force)
         except Exception as exc:
             err_msg = traceback.format_exc()
             logger.error(f"BackgroundIndexer: unhandled exception:\n{err_msg}")
             cls._update(status="error", last_error=str(exc))
 
     @classmethod
+    def _do_index_incremental(cls, root_dir: Path, changed_files: list[Path] | None = None) -> None:
+        """Incremental indexing logic — called from _run()."""
+        import warmup
+
+        warmup.ensure_loaded()
+
+        from code_intelligence import invalidate_import_graph_cache
+        from codebase_indexer import CodebaseIndexer
+        from config import get_ignored_dirs, get_max_memory_bytes
+        from context import get_context
+        from incremental_indexing import IndexMetadata
+        from memory_limited_indexer import MemoryLimitedIndexer
+        from vector_store_manager import vector_stack_available
+
+        metadata = IndexMetadata()
+        cls._update(status="scanning", phase="scan", mode="incremental")
+
+        if changed_files is None:
+            ignored_dirs = get_ignored_dirs()
+            ignore_patterns = _load_ignore_patterns(root_dir)
+            scan = _scan_files(root_dir, ignored_dirs, ignore_patterns)
+            all_files = scan.files
+            scan_truncated = not scan.complete
+            if scan_truncated:
+                cls._add_warning(f"File scan incomplete: {scan.truncated}")
+            files_to_index = metadata.get_changed_files(all_files)
+        else:
+            all_files = []
+            scan_truncated = False
+            files_to_index = changed_files
+
+        if cls._cancel_event.is_set():
+            cls._update(status="idle", last_error="Cancelled during scan", mode="incremental")
+            return
+
+        if not files_to_index:
+            # Check if any deleted files need to be pruned
+            removed = 0
+            if all_files and not scan_truncated:
+                ctx = get_context()
+                indexer = CodebaseIndexer(ctx.vector_store)
+                removed = indexer._prune_deleted(metadata, all_files)
+                if removed:
+                    metadata.save()
+                    ctx.vector_store.finalize_bm25(incremental_ok=True)
+            cls._update(
+                status="done",
+                phase="done",
+                mode="incremental",
+                files_done=0,
+                files_total=0,
+                chunks_done=0,
+                eta_seconds=0,
+            )
+            logger.info(
+                f"BackgroundIndexer: no changed files to index (removed {removed} deleted files)"
+            )
+            return
+
+        cls._update(
+            status="initializing_model",
+            phase="model_init",
+            mode="incremental",
+            files_total=len(files_to_index),
+            files_done=0,
+        )
+
+        ctx = get_context()
+        bm25_direct = not vector_stack_available()
+
+        if not bm25_direct:
+            collection = ctx.vector_store.get_collection()
+            if collection is None:
+                cls._update(
+                    status="error",
+                    last_error="Failed to initialise vector store.",
+                    mode="incremental",
+                )
+                return
+
+        if cls._cancel_event.is_set():
+            cls._update(status="idle", last_error="Cancelled after model init", mode="incremental")
+            return
+
+        cls._update(status="indexing", phase="embedding", mode="incremental")
+
+        max_memory = get_max_memory_bytes()
+        indexer = CodebaseIndexer(ctx.vector_store)
+        upserter = indexer._create_batch_upserter()
+        mem_indexer = MemoryLimitedIndexer(max_memory, upserter)
+
+        file_count = 0
+        import time as _time
+
+        t_start = _time.monotonic()
+        bm25_incremental_ok = True
+        progress_step = min(5, _PROGRESS_INTERVAL)
+
+        for i, file_path in enumerate(files_to_index):
+            if cls._cancel_event.is_set():
+                cls._update(
+                    status="idle",
+                    last_error="Cancelled during incremental indexing",
+                    mode="incremental",
+                )
+                return
+
+            def _bm25_update(
+                texts: list[str], metas: list[dict], ids: list[str], _fp=file_path
+            ) -> None:
+                nonlocal bm25_incremental_ok
+                if not ctx.vector_store.update_bm25_source(str(_fp), ids, texts, metas):
+                    bm25_incremental_ok = False
+
+            if indexer.process_file_with_metadata(
+                file_path, mem_indexer, metadata, delete_stale=True, on_chunks=_bm25_update
+            ):
+                file_count += 1
+
+            if (i + 1) % progress_step == 0 or i == len(files_to_index) - 1:
+                elapsed = _time.monotonic() - t_start
+                rate = file_count / elapsed if elapsed > 0 else 0
+                remaining = len(files_to_index) - (i + 1)
+                eta = int(remaining / rate) if rate > 0 else None
+                stats = mem_indexer.get_stats()
+                cls._update(
+                    files_done=i + 1,
+                    files_total=len(files_to_index),
+                    chunks_done=stats.get("total_chunks", 0),
+                    eta_seconds=eta,
+                    mode="incremental",
+                )
+
+        cls._update(status="finalizing", phase="bm25", eta_seconds=None, mode="incremental")
+
+        try:
+            mem_indexer.flush()
+        except Exception:
+            pass
+
+        if upserter.failed:
+            cls._update(
+                status="error",
+                last_error=(
+                    "Some chunks could not be written to the vector store. "
+                    "Index metadata was not saved; affected files will be re-indexed next run."
+                ),
+                mode="incremental",
+            )
+            return
+
+        if all_files and not scan_truncated:
+            removed = indexer._prune_deleted(metadata, all_files)
+            if removed:
+                logger.info(f"BackgroundIndexer: removed chunks of {removed} deleted files")
+
+        metadata.save()
+
+        logger.info("BackgroundIndexer: finalizing BM25 index (incremental)...")
+        ctx.vector_store.finalize_bm25(incremental_ok=bm25_incremental_ok)
+
+        invalidate_import_graph_cache()
+
+        stats = mem_indexer.get_stats()
+        cls._update(
+            status="done",
+            phase="done",
+            mode="incremental",
+            files_done=len(files_to_index),
+            files_total=len(files_to_index),
+            chunks_done=stats.get("total_chunks", 0),
+            eta_seconds=0,
+        )
+        logger.info(
+            f"BackgroundIndexer: incremental indexing done — {file_count} files, "
+            f"{stats.get('total_chunks', 0)} chunks"
+        )
+
+    @classmethod
     def _do_index(cls, root_dir: Path, force: bool) -> None:
         """Actual indexing logic — called from _run()."""
+        import warmup
+
+        # This thread and a concurrent tool call must not import the heavy
+        # modules at the same time; see warmup.py.
+        warmup.ensure_loaded()
+
         from code_intelligence import invalidate_import_graph_cache
         from codebase_indexer import CodebaseIndexer
         from config import get_ignored_dirs
@@ -518,6 +779,7 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
     """
     status = data.get("status", "unknown")
     phase = data.get("phase", "")
+    mode = data.get("mode", "")
     files_done = data.get("files_done", 0)
     files_total = data.get("files_total", 0)
     chunks = data.get("chunks_done", 0)
@@ -535,6 +797,7 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
         "finalizing": "🔄",
         "done": "✅",
         "error": "❌",
+        "interrupted": "⚠️",
     }
     icon = icon_map.get(status, "❓")
 
@@ -542,8 +805,9 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
     bar_filled = int(pct / 5)
     bar = "█" * bar_filled + "░" * (20 - bar_filled)
 
+    mode_suffix = f" ({mode})" if mode else ""
     lines = [
-        f"## {icon} Indexing Status: `{status}`",
+        f"## {icon} Indexing Status: `{status}`{mode_suffix}",
         f"**Phase**: {phase}" if phase else "",
         f"**Project**: `{root_dir}`" if root_dir else "",
         "",
@@ -552,7 +816,7 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
         f"**Chunks indexed**: {chunks:,}",
     ]
 
-    if eta is not None and status not in ("done", "idle", "error"):
+    if eta is not None and status not in ("done", "idle", "error", "interrupted"):
         if eta > 60:
             lines.append(f"**ETA**: ~{eta // 60} min {eta % 60} sec")
         else:
@@ -585,6 +849,11 @@ def format_progress_markdown(data: dict[str, Any]) -> str:
             lines.append(
                 "\n✅ Indexing complete! You can now use `search_codebase()` for semantic search."
             )
+    elif status == "interrupted":
+        lines.append(
+            "\n⚠️ Previous indexing run was interrupted (e.g. server restarted). "
+            "Call `index_changed_files()` or `index_codebase()` to resume."
+        )
     elif status == "initializing_model":
         lines.append("\n_Loading SentenceTransformer model — this takes 30–60 s on first run._")
     elif status in ("scanning", "indexing", "finalizing"):

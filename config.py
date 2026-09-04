@@ -129,6 +129,15 @@ def is_mcp_server_dir(path: Path) -> bool:
 
 MODEL_NAME = "flax-sentence-embeddings/st-codesearch-distilroberta-base"
 
+# Pinned model commit. Without it sentence-transformers resolves `main` on every
+# load, and when upstream moves the branch the Hub treats it as a new revision:
+# on Windows (no symlinks) that means re-downloading the full 328 MB weights
+# into a second cache snapshot, silently, mid-session. A pinned revision also
+# keeps embeddings reproducible — the same code cannot suddenly index against
+# different weights. Override with PROJECTMIND_MODEL_REVISION, or set it to
+# "main" to opt back into whatever upstream currently publishes.
+MODEL_REVISION = "65b0f39bfa41c59993f62b57447c942e371b7135"
+
 CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 150
 BATCH_SIZE = 100
@@ -261,6 +270,11 @@ def get_max_file_size_bytes() -> int:
         except ValueError:
             pass
     return MAX_FILE_SIZE_MB * 1024 * 1024
+
+
+def get_model_revision() -> str:
+    """Model commit to load. Override via PROJECTMIND_MODEL_REVISION."""
+    return os.getenv("PROJECTMIND_MODEL_REVISION") or MODEL_REVISION
 
 
 def get_max_memory_bytes() -> int:

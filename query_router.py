@@ -184,6 +184,9 @@ def _tier_l1_symbol(query: str, n: int) -> list[QueryHit]:
     full-repo graph build — the graph is (re)built by the background indexer.
     """
     try:
+        import warmup
+
+        warmup.ensure_loaded()
         from symbol_graph import peek_symbol_graph, query_symbol_graph
 
         if peek_symbol_graph() is None:

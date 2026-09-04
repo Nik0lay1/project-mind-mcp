@@ -5,12 +5,12 @@
 [![CI](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.10.0-orange)
+![Version](https://img.shields.io/badge/version-0.11.0-orange)
 [![PyPI](https://img.shields.io/pypi/v/projectmind-mcp)](https://pypi.org/project/projectmind-mcp/)
 
 **ProjectMind** is an open-source [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that supercharges AI assistants like Claude, Zencoder, and Cursor with long-term project memory and intelligent codebase search.
 
-> 🤖 **This project was built with AI** — designed, coded, debugged, and documented using AI-assisted development from day one.
+> 🤖 **This project is developed with AI** — designed, coded, tested, and documented in continuous collaboration with AI coding assistants from day one. Publicly open on GitHub for both human developers and autonomous AI agents.
 
 ---
 
@@ -23,8 +23,9 @@ Every time you start a new AI session, your assistant forgets everything about y
 - **Symbol graph** — ask "who calls this function?" and get exact file:line answers
 - **Dependency graph analysis** to understand how modules connect
 - **Works 100% locally** — your code never leaves your machine
+- **Non-blocking by default** — incremental indexing runs in the background, eliminating IDE timeouts
 
-**New in v0.10.0**: 🧭 one shared file-selection path — `.indexignore` now governs the symbol graph and the manifest too, so generated output (`.next`, `dist`) stops crowding out your source; partial graphs report *why* instead of answering "no symbols found".
+**New in v0.11.0**: ⏱️ Full background incremental indexing (`index_changed_files`), automatic crash/stale state recovery, GPU acceleration auto-detection for embeddings, and complete elimination of tool timeouts.
 
 📝 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
@@ -126,15 +127,22 @@ Two search engines combined via **Reciprocal Rank Fusion (RRF)**:
 - Automatic fallback to pure vector search when the BM25 index is not ready
 - The BM25 index is persisted as **JSON** (`.ai/bm25_index.json`) — never pickle, so indexing a third-party repo can't execute untrusted input
 
-### 🔄 True Incremental Indexing
+### 🔄 True Incremental Indexing (Non-Blocking)
 `index_changed_files` re-indexes only what changed — and cleans up after itself:
-- A changed file's **old chunks are deleted** before the new ones land (renamed/removed symbols don't haunt search results)
-- Chunks of **deleted files** are removed from ChromaDB, BM25 and the metadata
-- BM25 is patched **in memory** per file and rebuilt once — no full-database fetch per small change
-- Failed writes are never silent: metadata isn't saved, so affected files retry on the next run
+- **Non-blocking by default** (`background=True`): returns immediately (< 15 ms) so AI assistants and IDEs never hit MCP tool timeouts.
+- A changed file's **old chunks are deleted** before the new ones land (renamed/removed symbols don't haunt search results).
+- **Smart DB operations**: skips redundant ChromaDB delete queries for new files, and tracks empty files without repeated indexing loops.
+- Chunks of **deleted files** are removed from ChromaDB, BM25, and metadata.
+- BM25 is patched **in memory** per file and rebuilt once — no full-database fetch per small change.
+- Failed writes are never silent: metadata isn't saved, so affected files retry on the next run.
 
-### 🏃 Background Indexing
-`index_codebase()` returns instantly and indexes in a daemon thread; `session_init` auto-starts it when the index is missing. Poll `get_index_progress()` for a live progress bar with ETA. Switching projects mid-run cancels the old job safely — no cross-project contamination.
+### 🏃 Background Indexing & Auto-Recovery
+Both full (`index_codebase`) and incremental (`index_changed_files`) indexing run in dedicated daemon threads:
+- Returns instantly with status and file count while heavy embedding work proceeds in the background.
+- `session_init` auto-starts full background indexing when the index is missing or empty.
+- Poll `get_index_progress()` for a live progress bar, file counts, and ETA.
+- **Self-Healing & Stale State Recovery**: if the server process was killed or restarted mid-indexing, interrupted runs are automatically detected and reported as `interrupted` instead of remaining permanently stuck.
+- Switching projects mid-run cancels the old job safely — no cross-project contamination.
 
 ### 🩺 Self-Healing Maintenance Daemon
 A background thread keeps the index lean without user intervention. State persists in `.ai/maintenance_state.json`.
@@ -231,7 +239,7 @@ If the index doesn't exist yet, background indexing starts automatically — che
 | **Symbols** | `find_symbol`, `get_symbol_relations` (callers / callees / implementors / subclasses / bases / usages) |
 | **Exploration** | `get_project_overview`, `explore_directory`, `get_file_summary` |
 | **Dependencies** | `get_file_relations`, `get_dependencies_with_depth`, `get_module_cluster`, `find_dependency_path`, `analyze_change_impact` |
-| **Indexing** | `index_codebase` (background by default), `index_changed_files`, `get_index_progress`, `get_index_stats`, `prune_index` |
+| **Indexing** | `index_codebase` (background by default), `index_changed_files` (background by default), `get_index_progress`, `get_index_stats`, `prune_index` |
 | **Git** | `ingest_git_history`, `get_recent_changes_summary`, `auto_update_memory_from_commits` |
 | **Quality** | `analyze_code_complexity`, `analyze_code_quality`, `get_test_coverage_info` |
 | **Maintenance** | `maintenance_status`, `maintenance_run` |
@@ -266,7 +274,7 @@ AI Assistant (Claude / Zencoder / Cursor)
 
 **Embedding model**: `flax-sentence-embeddings/st-codesearch-distilroberta-base`
 - Trained specifically on code (CodeSearchNet dataset)
-- ~130 MB, runs fully locally on CPU
+- ~130 MB, runs fully locally with automatic GPU (CUDA) acceleration and multi-threaded CPU fallback
 - No API keys, no data sent anywhere
 
 **Search pipeline**: manifest + symbol graph + BM25 (keyword) + ChromaDB (semantic) → Reciprocal Rank Fusion → top-N results

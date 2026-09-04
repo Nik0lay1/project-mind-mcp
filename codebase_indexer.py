@@ -174,7 +174,7 @@ class CodebaseIndexer:
         try:
             content = safe_read_text(file_path)
             if not content.strip():
-                return False
+                return True
 
             chunks = self.splitter.split(content, file_path)
 
@@ -238,7 +238,7 @@ class CodebaseIndexer:
             logger.error(f"Error reading mtime for {file_path}: {e}")
             return False
 
-        if delete_stale:
+        if delete_stale and str(file_path) in metadata.metadata:
             self.vector_store.delete_by_source(str(file_path))
 
         if not self.process_file_to_chunks(file_path, indexer, on_chunks=on_chunks):

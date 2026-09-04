@@ -64,6 +64,9 @@ class AppContext:
         Returns:
             SymbolGraph instance (may be empty if build fails).
         """
+        import warmup
+
+        warmup.ensure_loaded()
         with _symbol_graph_lock:
             if self._symbol_graph is None:
                 from symbol_graph import get_or_build_symbol_graph
@@ -91,6 +94,13 @@ def get_context() -> AppContext:
     global _app_context
     if _app_context is not None:
         return _app_context
+
+    # Outside _context_lock, and before create_default() imports anything: the
+    # heavy imports must happen in one thread at a time or CPython's per-module
+    # locks deadlock. See warmup.py.
+    import warmup
+
+    warmup.ensure_loaded()
 
     with _context_lock:
         if _app_context is None:
@@ -138,10 +148,26 @@ def reset_context() -> None:
     """Resets the global context to None. Useful for testing."""
     global _app_context
     _app_context = None
-    # Also invalidate symbol graph cache
-    try:
-        from symbol_graph import invalidate_symbol_graph_cache
+    invalidate_symbol_graph_cache_if_loaded()
 
-        invalidate_symbol_graph_cache()
-    except ImportError:
+
+def invalidate_symbol_graph_cache_if_loaded() -> None:
+    """
+    Drops the cached symbol graph, but only if `symbol_graph` is already imported.
+
+    Importing that module pulls in tree-sitter and every language grammar, which
+    costs ~18 s on a cold process. `session_init` used to pay that on the plain
+    `import` line alone — enough on its own to blow past the client's 30 s tool
+    timeout before any work started. When the module was never loaded there is
+    no in-memory cache to invalidate, so skipping the import is not just faster,
+    it is equivalent.
+    """
+    import sys
+
+    module = sys.modules.get("symbol_graph")
+    if module is None:
+        return
+    try:
+        module.invalidate_symbol_graph_cache()
+    except Exception:
         pass

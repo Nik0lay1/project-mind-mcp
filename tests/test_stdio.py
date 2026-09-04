@@ -4,8 +4,19 @@
 import json
 import subprocess
 import sys
+import time
+
+import pytest
+
+# The server imports tree-sitter and the numpy/torch stack on the main thread
+# before it answers anything (see warmup.py — those imports hang if a worker
+# thread does them). That is real work: ~10 s idle, more on a loaded machine,
+# and it lands entirely inside `initialize`. The suite-wide 30 s budget started
+# failing here at random once the imports moved to boot.
+BOOT_BUDGET_SECONDS = 120.0
 
 
+@pytest.mark.timeout(180)
 def test_mcp_server() -> None:
     """Test basic MCP server communication"""
 
@@ -43,8 +54,19 @@ def test_mcp_server() -> None:
         # Read response
         print("Waiting for response...")
         assert process.stdout is not None
+        started = time.monotonic()
         response_line = process.stdout.readline()
+        boot_seconds = time.monotonic() - started
+        print(f"Boot-to-initialize: {boot_seconds:.1f}s")
         print(f"Response: {response_line}")
+
+        # Guards the operational limit, not the test: an MCP client gives the
+        # server a fixed window to answer `initialize`. If boot creeps past it,
+        # the server stops being launchable and this is where we find out.
+        assert boot_seconds < BOOT_BUDGET_SECONDS, (
+            f"server took {boot_seconds:.1f}s to answer initialize; clients will "
+            "time out on startup"
+        )
 
         if response_line:
             response = json.loads(response_line)

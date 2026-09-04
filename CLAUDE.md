@@ -73,6 +73,7 @@ Duplicate entries under the same section are skipped automatically.
 | `run_index.py` | Helper script for manual full re-indexing |
 | `config.py` | All configuration (model, paths, extensions) |
 | `context.py` | Dependency injection (AppContext singleton) |
+| `warmup.py` | Heavy imports (tree-sitter, numpy/torch stack) — once, on the main thread |
 | `memory_manager.py` | Read/write/version `.ai/memory.md` |
 | `code_intelligence.py` | Import graph, complexity analysis |
 | `incremental_indexing.py` | Track changed files via mtime |
@@ -93,6 +94,18 @@ Duplicate entries under the same section are skipped automatically.
   and manifest — and matching directories are pruned, never descended into.
   Add generated output (`.next`, `dist`) here: without it the symbol graph
   spends its budget parsing minified bundles instead of your source.
+- **Startup**: the server imports tree-sitter and the numpy/torch stack on the
+  main thread before it starts serving. This is deliberate — those extensions
+  hang when loaded from a background thread on Windows. Measured
+  boot-to-`initialize`: **27–35 s**, of which ~16 s is `import
+  sentence_transformers` (pulled in twice over: `ast_splitter` imports
+  `langchain_text_splitters`, which drags the whole ML stack for one text
+  splitter). That is close enough to a client's default startup timeout to
+  matter — set `MCP_TIMEOUT=60000` for the client if the server fails to launch.
+  `tests/test_stdio.py` measures this and fails if boot passes 120 s.
+- **Embedding model revision**: pinned (`MODEL_REVISION` in `config.py`,
+  override with `PROJECTMIND_MODEL_REVISION`) and loaded from the local HF cache
+  first. An unpinned `main` re-downloads 328 MB whenever upstream moves.
 - **Symbol graph budget**: `PROJECTMIND_SYMBOL_GRAPH_BUDGET_SECONDS` (default
   300 s) and `PROJECTMIND_SYMBOL_GRAPH_MAX_FILES` (default 8000). A build that
   hits either limit is reported as partial by `find_symbol` and `health`.

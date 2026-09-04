@@ -734,7 +734,10 @@ def _build_import_graph_uncached(root: Path, max_files: int | None = None) -> di
     budget_hit = False
 
     for fpath, ext in code_files:
-        if (time.monotonic() - start) > time_budget:
+        # `>=`, not `>`: monotonic() has ~15.6 ms granularity on Windows, so a
+        # zero budget measured 0.0 elapsed and scanned the whole (small) repo
+        # anyway — which made the budget tests flaky rather than the budget wrong.
+        if (time.monotonic() - start) >= time_budget:
             budget_hit = True
             break
         if ext not in CODE_EXTENSIONS:

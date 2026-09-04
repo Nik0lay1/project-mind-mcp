@@ -1,9 +1,14 @@
+import functools
+import inspect
 import os
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from time import time
+from typing import Any
 
+import anyio.to_thread
 from mcp.server.fastmcp import FastMCP
 
 import config
@@ -31,6 +36,11 @@ def log(message: str) -> None:
 
 
 def startup_check() -> None:
+    from logger import rebind_log_file
+
+    # Runs after every reconfigure(), so this is where the log follows the
+    # project instead of staying in whichever directory started the process.
+    rebind_log_file()
     log("=" * 60)
     log("ProjectMind MCP Server Starting...")
     log(f"Project Root (detected): {config.PROJECT_ROOT}")
@@ -118,6 +128,42 @@ def ensure_startup() -> None:
 
 
 mcp = FastMCP("ProjectMind")
+
+# ---------------------------------------------------------------------------
+# Tools must never run on the event loop
+# ---------------------------------------------------------------------------
+# FastMCP calls a *synchronous* tool body directly inside the asyncio task that
+# reads stdin (mcp/server/fastmcp/utilities/func_metadata.py: `return fn(...)`).
+# Every tool here is sync, so one slow call froze the whole server: the stdio
+# reader could not pick up the next request and the client saw nothing at all —
+# not a slow answer, not an error, just "no response or progress for 1800s".
+#
+# Wrapping each tool in a coroutine that offloads to a worker thread keeps the
+# event loop free, so a slow index/model call can no longer take the session
+# with it. The decorator returns the *original* sync function, so direct calls
+# (tests, other modules, `run_index.py`) keep working unchanged.
+_register_tool = mcp.tool
+
+
+def _threaded_tool(*dargs: Any, **dkwargs: Any) -> Callable[[Callable], Callable]:
+    register = _register_tool(*dargs, **dkwargs)
+
+    def decorator(fn: Callable) -> Callable:
+        if inspect.iscoroutinefunction(fn):
+            register(fn)
+            return fn
+
+        @functools.wraps(fn)
+        async def async_tool(*args: Any, **kwargs: Any) -> Any:
+            return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+
+        register(async_tool)
+        return fn
+
+    return decorator
+
+
+mcp.tool = _threaded_tool  # type: ignore[method-assign]
 
 
 def _check_model_loaded() -> str | None:
@@ -253,9 +299,9 @@ def _reset_indexing_state_for_new_root() -> None:
     except Exception:
         pass
     try:
-        from symbol_graph import invalidate_symbol_graph_cache
+        from context import invalidate_symbol_graph_cache_if_loaded
 
-        invalidate_symbol_graph_cache()
+        invalidate_symbol_graph_cache_if_loaded()
     except Exception:
         pass
 
@@ -286,6 +332,7 @@ def set_project_root(path: str) -> str:
     _reset_indexing_state_for_new_root()
     _startup_done = False
     ensure_startup()
+    _ensure_default_indexignore()
     log(f"Project root changed to: {config.PROJECT_ROOT}")
 
     msg = f"Project root set to: {config.PROJECT_ROOT}"
@@ -349,16 +396,32 @@ def _server_version() -> str:
 
 
 def _symbol_graph_status() -> str:
-    """One-line symbol-graph state for health output (never builds the graph)."""
-    try:
-        from symbol_graph import peek_symbol_graph
+    """
+    One-line symbol-graph state for health output.
 
-        graph = peek_symbol_graph()
+    Never builds the graph — and never *imports* symbol_graph either. That
+    import costs ~18 s of tree-sitter grammars, and an `import` statement here
+    would additionally block on the module lock whenever the warm-up thread is
+    mid-import, so `health` — the one tool that must always answer — was the
+    slowest thing in the server. Read the already-imported module if there is
+    one, otherwise report from the file on disk.
+    """
+    module = sys.modules.get("symbol_graph")
+    # `peek_symbol_graph` is missing while another thread is still executing the
+    # module body; getattr keeps us out of that wait.
+    peek = getattr(module, "peek_symbol_graph", None) if module is not None else None
+    if peek is None:
+        graph_file = config.AI_DIR / "symbol_graph.json"
+        if not graph_file.exists():
+            return "not built yet — run `index_codebase()`"
+        return "built (on disk, not loaded into this process yet)"
+    try:
+        graph = peek()
     except Exception as exc:
         return f"unavailable ({exc})"
     if graph is None:
         return "not built yet — run `index_codebase()`"
-    return graph.status_line()
+    return str(graph.status_line())
 
 
 def _background_index_warnings() -> list[str]:
@@ -419,6 +482,34 @@ def health() -> str:
     return "\n".join(parts)
 
 
+def _warm_project_async() -> None:
+    """
+    Finish the warm-up once `session_init` has told us which project this is.
+
+    Loads the on-disk symbol graph and builds the app context (which schedules
+    the embedding-model load). The expensive part — the imports themselves — is
+    serialised by `warmup.ensure_loaded()`; see that module for why doing it in
+    two threads at once deadlocked the server.
+    """
+
+    def _warm() -> None:
+        try:
+            import warmup
+
+            warmup.ensure_loaded()
+            from symbol_graph import peek_symbol_graph
+
+            peek_symbol_graph()  # loads the on-disk graph; never builds
+            from vector_store_manager import vector_stack_available
+
+            if vector_stack_available():
+                get_context()
+        except Exception as exc:  # never let a warm-up failure surface as a crash
+            log(f"Warm-up failed: {exc}")
+
+    threading.Thread(target=_warm, name="pm-warm-project", daemon=True).start()
+
+
 @mcp.tool()
 def session_init(project_path: str = "") -> str:
     """
@@ -463,6 +554,7 @@ def session_init(project_path: str = "") -> str:
         _reset_indexing_state_for_new_root()
         _startup_done = False
         ensure_startup()
+        _ensure_default_indexignore()
         sections.append(f"**Project root** set to: `{config.PROJECT_ROOT}`")
     else:
         ensure_startup()
@@ -556,6 +648,8 @@ def session_init(project_path: str = "") -> str:
             sections.append("## Memory\n_No memory file yet. It will be created on first update._")
     except Exception as e:
         sections.append(f"## Memory\n_Error reading memory: {e}_")
+
+    _warm_project_async()
 
     # Self-healing daemon
     try:
@@ -1870,6 +1964,9 @@ def find_symbol(name: str, n_results: int = 8) -> str:
     if not name.strip():
         return "Error: name cannot be empty"
     try:
+        import warmup
+
+        warmup.ensure_loaded()
         from symbol_graph import SymbolGraphBusy, query_symbol_graph
 
         try:
@@ -1929,6 +2026,9 @@ def get_symbol_relations(symbol: str, relation: str = "usages") -> str:
     symbol = symbol.strip()
     relation = relation.strip().lower()
     try:
+        import warmup
+
+        warmup.ensure_loaded()
         import symbol_graph as sg
 
         if relation == "info":
@@ -2890,29 +2990,102 @@ def get_recent_changes_summary(days: int = 7) -> str:
 
 
 @mcp.tool()
-def index_changed_files() -> str:
+def index_changed_files(background: bool = True) -> str:
     """
     Incrementally indexes only changed files since last indexing.
 
-    Faster than index_codebase — only processes files modified since last run.
+    By default runs in background mode (non-blocking): detects changed files and
+    offloads embedding work to a background daemon thread, returning immediately.
+    Call `get_index_progress()` to monitor completion.
+
+    Args:
+        background: If True (default), runs indexing in background and returns
+                    immediately. If False, blocks until complete (old behaviour).
 
     Returns:
-        Status message with indexing stats
+        Status message with indexing info
     """
+    from background_indexer import BackgroundIndexer
     from code_intelligence import invalidate_import_graph_cache
+    from config import get_ignored_dirs, is_mcp_server_dir
+    from context import get_context
+    from file_scanner import scan_files
+    from incremental_indexing import IndexMetadata
     from vector_store_manager import vector_stack_available
 
+    root_dir = config.PROJECT_ROOT
+    warn_own_dir = ""
+    if is_mcp_server_dir(root_dir):
+        warn_own_dir = (
+            "⚠️ Note: indexing the ProjectMind MCP server's OWN directory " f"({root_dir}).\n\n"
+        )
+
+    ignored_dirs = get_ignored_dirs()
+    ignore_patterns = load_index_ignore_patterns()
+
+    if background:
+        if BackgroundIndexer.is_running():
+            prog = BackgroundIndexer.get_progress()
+            done = prog.get("files_done", 0)
+            total = prog.get("files_total", 0)
+            pct = int(done / total * 100) if total else 0
+            phase = prog.get("phase") or prog.get("status") or "?"
+            return (
+                f"{warn_own_dir}"
+                f"⏳ Background indexing already in progress: {done}/{total} files ({pct}%), "
+                f"phase `{phase}`.\n"
+                "Call `get_index_progress()` to monitor completion."
+            )
+
+        metadata = IndexMetadata()
+        scan = scan_files(
+            root_dir, ignore_patterns=ignore_patterns, ignored_dirs=ignored_dirs, max_files=20000
+        )
+        all_files = scan.files
+        changed_files = metadata.get_changed_files(all_files)
+
+        if not changed_files:
+            if scan.complete:
+                # Only construct heavy context if tracked files were actually removed
+                tracked_files = set(metadata.metadata.keys())
+                existing_files = {str(f) for f in all_files}
+                if tracked_files - existing_files:
+                    from codebase_indexer import CodebaseIndexer
+
+                    ctx = get_context()
+                    indexer = CodebaseIndexer(ctx.vector_store)
+                    removed = indexer._prune_deleted(metadata, all_files)
+                    if removed:
+                        metadata.save()
+                        ctx.vector_store.finalize_bm25(incremental_ok=True)
+                        return (
+                            f"{warn_own_dir}"
+                            f"No changed files to index. Removed {removed} deleted files from index."
+                        )
+            return f"{warn_own_dir}No changed files to index."
+
+        started = BackgroundIndexer.start_incremental(changed_files=changed_files)
+        if started:
+            return (
+                f"{warn_own_dir}"
+                f"⏳ Found {len(changed_files)} changed files. Background incremental indexing started.\n"
+                "Call `get_index_progress()` to monitor progress."
+            )
+        else:
+            return (
+                f"{warn_own_dir}"
+                "⏳ Background indexer is already running or could not be started. "
+                "Call `get_index_progress()` to check status."
+            )
+
+    # Synchronous mode (background=False)
     ctx = get_context()
     if vector_stack_available() and ctx.vector_store.get_collection() is None:
         return "Failed to initialize vector store."
 
-    root_dir = config.PROJECT_ROOT
-    ignored_dirs = get_ignored_dirs()
-    ignore_patterns = load_index_ignore_patterns()
-
     result = ctx.indexer.index_changed(root_dir, ignored_dirs, ignore_patterns)
     invalidate_import_graph_cache()
-    return result
+    return warn_own_dir + result
 
 
 def should_include_search_result(
@@ -3550,7 +3723,14 @@ def prune_index(force: bool = False) -> str:
 
 
 def _ensure_default_indexignore() -> None:
-    """Creates a sensible default `.indexignore` if none exists, only on first run."""
+    """
+    Creates a sensible default `.indexignore` for the active project, once.
+
+    Called wherever the user picks a project — `main()`, `session_init` and
+    `set_project_root`. It used to run only from `main()`, against whatever root
+    was auto-detected at boot; a project reached through `session_init` never
+    got defaults, so its generated trees were indexed as if they were source.
+    """
     target = config.AI_DIR / ".indexignore"
     root_target = config.PROJECT_ROOT / ".indexignore"
     if root_target.exists() or target.exists():
@@ -3569,6 +3749,7 @@ def _ensure_default_indexignore() -> None:
             ".turbo\n"
             ".vercel\n"
             "playwright-report\n"
+            ".stryker-tmp\n"
             "__snapshots__\n"
             ".pytest_cache\n"
             ".mypy_cache\n"
@@ -3586,8 +3767,12 @@ def _ensure_default_indexignore() -> None:
 
 def main() -> None:
     """Console entry point (`uvx projectmind-mcp` / `projectmind`)."""
+    import warmup
+
     ensure_startup()
     _ensure_default_indexignore()
+    # On the main thread, before anything can run in a worker: see warmup.py.
+    warmup.ensure_loaded()
     try:
         from maintenance import start_daemon
 
