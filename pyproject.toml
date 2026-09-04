@@ -55,10 +55,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Nik0lay1/project-mind-mcp"
-Repository = "https://github.com/Nik0lay1/project-mind-mcp"
-Changelog = "https://github.com/Nik0lay1/project-mind-mcp/blob/main/CHANGELOG.md"
-Issues = "https://github.com/Nik0lay1/project-mind-mcp/issues"
+Homepage = "https://github.com/mykolariabokon/project-mind-mcp"
+Repository = "https://github.com/mykolariabokon/project-mind-mcp"
+Changelog = "https://github.com/mykolariabokon/project-mind-mcp/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mykolariabokon/project-mind-mcp/issues"
 
 [project.scripts]
 projectmind-mcp = "mcp_server:main"

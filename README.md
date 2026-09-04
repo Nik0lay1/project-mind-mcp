@@ -2,7 +2,7 @@
 
 > Give your AI coding assistant a brain. Persistent memory, semantic code search, a symbol-level call graph, and project intelligence — all running locally with no API keys required.
 
-[![CI](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Nik0lay1/project-mind-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/mykolariabokon/project-mind-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mykolariabokon/project-mind-mcp/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.11.0-orange)
@@ -198,7 +198,7 @@ claude mcp add --scope user Memory -- uvx --from "projectmind-mcp[vector]" proje
 ### From source (development)
 
 ```bash
-git clone https://github.com/Nik0lay1/project-mind-mcp.git
+git clone https://github.com/mykolariabokon/project-mind-mcp.git
 cd project-mind-mcp
 python -m venv .venv
 
