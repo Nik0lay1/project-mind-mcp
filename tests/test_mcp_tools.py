@@ -5,33 +5,27 @@ import pytest
 
 sys.path.append(os.getcwd())
 
-try:
-    from mcp_server import (
-        analyze_code_complexity,
-        analyze_project_structure,
-        auto_update_memory_from_commits,
-        delete_memory_section,
-        ensure_startup,
-        extract_tech_stack,
-        generate_project_summary,
-        get_index_stats,
-        get_recent_changes_summary,
-        get_test_coverage_info,
-        index_changed_files,
-        index_codebase,
-        ingest_git_history,
-        list_memory_versions,
-        read_memory,
-        save_memory_version,
-        search_codebase,
-        search_codebase_advanced,
-        update_memory,
-    )
-
-    print("Successfully imported tools.")
-except ImportError as e:
-    print(f"Failed to import tools: {e}")
-    sys.exit(1)
+from mcp_server import (
+    analyze_code_complexity,
+    analyze_project_structure,
+    auto_update_memory_from_commits,
+    delete_memory_section,
+    ensure_startup,
+    extract_tech_stack,
+    generate_project_summary,
+    get_index_stats,
+    get_recent_changes_summary,
+    get_test_coverage_info,
+    index_changed_files,
+    index_codebase,
+    ingest_git_history,
+    list_memory_versions,
+    read_memory,
+    save_memory_version,
+    search_codebase,
+    search_codebase_advanced,
+    update_memory,
+)
 
 
 def test_memory_tools() -> None:

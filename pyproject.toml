@@ -22,7 +22,7 @@ classifiers = [
 # Core install is lightweight: BM25 + annotations + symbol graph + memory.
 # The embedding/vector stack is the optional [vector] extra.
 dependencies = [
-    "mcp>=0.1.0",
+    "mcp>=0.1.0,<2",
     "langchain-text-splitters>=0.0.1",
     "GitPython>=3.1.0",
     "radon>=6.0.0",
